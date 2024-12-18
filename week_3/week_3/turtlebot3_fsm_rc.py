@@ -16,18 +16,25 @@
 # edit the model you can import it in RoboTool.
 #
 
+import random
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSPresetProfiles, QoSProfile, QoSHistoryPolicy
 
 from geometry_msgs.msg import Twist, Vector3
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
+# from tf_transformations import euler_from_quaternion
 
 from enum import Enum
+import math
 
 # Enumeration for keeping track of current state
 class State(Enum):
     INITIAL = 0
     FORWARD = 1
-    TURNING = 2
+    TURNING_LEFT = 2
+    TURNING_RIGHT = 3
 
 # Enumeration for keeping track of execution of a state's action
 class Action(Enum):
@@ -39,6 +46,10 @@ class Action(Enum):
 lvel = 0.3 # linear velocity
 avel = 1.5 # angular velocity
 
+CENTER = 0
+LEFT = 1
+RIGHT = 2
+
 class TurtleBot3FSMRC(Node):
     def __init__(self):
         super().__init__('turtlebot3_fsm')
@@ -46,9 +57,25 @@ class TurtleBot3FSMRC(Node):
         # Initial node
         self.state = State.INITIAL
         self.action = Action.ENTRY
+        self.scan_data_ = [0.0] * 3
 
         # Clock
         self.clock_C = 0
+
+        qos = QoSProfile(history = QoSHistoryPolicy.KEEP_LAST,
+                         depth = 10)
+
+        self.scan_subscriber = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            QoSPresetProfiles.SENSOR_DATA.value)
+
+        # self.odom_sub_ = self.create_subscription(
+        #     Odometry,
+        #     '/odom',
+        #     self.odom_callback,
+        #     qos)
         
         # Output
         self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
@@ -66,6 +93,29 @@ class TurtleBot3FSMRC(Node):
 
     def since_clock_C(self):
         return self.timer_period * self.clock_C / self.time_unit
+
+    # def odom_callback(self, msg):
+    #     q = [msg.pose.pose.orientation.x,
+    #          msg.pose.pose.orientation.y,
+    #          msg.pose.pose.orientation.z,
+    #          msg.pose.pose.orientation.w]
+        
+    #     (roll, pitch, yaw) = euler_from_quaternion(q)
+    #     self.robot_pose_ = yaw
+
+        self.get_logger().info(f"robot_pose_: {self.robot_pose_}")
+
+
+    def scan_callback(self, msg):
+        scan_angle = [0, 30, 330]
+
+        for num in range(0, 3):
+            if math.isinf(msg.ranges[scan_angle[num]]):
+                self.scan_data_[num] = msg.range_max
+            else:
+                self.scan_data_[num] = msg.ranges[scan_angle[num]]
+
+        self.get_logger().info(f"scan_data_: {self.scan_data_}")
     
     def cmd_vel(self, twist):
         self.publisher.publish(twist)
@@ -74,6 +124,9 @@ class TurtleBot3FSMRC(Node):
     def control_loop(self):
 
         self.increment_clocks()
+        escape_range = math.radians(30)
+        check_forward_dist = 0.7
+        check_side_dist = 0.6
 
         match self.state:
             # Initial Junction
@@ -91,31 +144,64 @@ class TurtleBot3FSMRC(Node):
 
                         self.action = Action.INTERRUPTABLE
                     case Action.INTERRUPTABLE:
+                        if self.scan_data_[CENTER] > check_forward_dist:
+                            if self.scan_data_[LEFT] < check_side_dist:
+                                self.state = State.TURNING_RIGHT
+                            elif self.scan_data_[RIGHT] < check_side_dist:
+                                self.state = State.TURNING_LEFT
+                        if self.scan_data_[CENTER] < check_forward_dist:
+                            if (random.randint(0,1) == 0):
+                                self.state = State.TURNING_LEFT
+                            else:
+                                self.state = State.TURNING_RIGHT
                         # Check transition's guard from Forward -> Turning.
-                        if self.since_clock_C() > 4:
+                        if self.since_clock_C() > 10:
                             # No exit action present
                             self.get_logger().info("Transition from 'FORWARD' to 'TURNING")
                             # Transition's action
                             self.reset_clock_C()
                             self.action = Action.ENTRY
-                            self.state = State.TURNING
+                            if (random.randint(0,1) == 0):
+                                self.state = State.TURNING_LEFT
+                            else:
+                                self.state = State.TURNING_RIGHT
                     case _:
                         pass
 
             # State Turning
-            case State.TURNING:
+            case State.TURNING_LEFT:
                 match self.action:
                     case Action.ENTRY:
                         # Entry action
-                        self.get_logger().info("Entering state: 'TURNING'")
+                        self.get_logger().info("Entering state: 'TURNING LEFT'")
+                        self.cmd_vel(Twist(linear=Vector3(x=0.0, y=0.0, z=0.0), angular=Vector3(x=0.0, y=0.0, z=-avel)))
+
+                        self.action = Action.INTERRUPTABLE
+                    case Action.INTERRUPTABLE:
+                        # Check transition's guard from Turning -> Forward.
+                        if self.since_clock_C() > random.random():
+                            # No exit action present
+                            self.get_logger().info("Transition from 'TURNING LEFT' to 'FORWARD")
+                            # Transition's action
+                            self.reset_clock_C()
+                            self.action = Action.ENTRY
+                            self.state = State.FORWARD
+                    case _:
+                        pass
+
+            case State.TURNING_RIGHT:
+                match self.action:
+                    case Action.ENTRY:
+                        # Entry action
+                        self.get_logger().info("Entering state: 'TURNING RIGHT'")
                         self.cmd_vel(Twist(linear=Vector3(x=0.0, y=0.0, z=0.0), angular=Vector3(x=0.0, y=0.0, z=avel)))
 
                         self.action = Action.INTERRUPTABLE
                     case Action.INTERRUPTABLE:
                         # Check transition's guard from Turning -> Forward.
-                        if self.since_clock_C() > 1:
+                        if self.since_clock_C() > random.random():
                             # No exit action present
-                            self.get_logger().info("Transition from 'TURNING' to 'FORWARD")
+                            self.get_logger().info("Transition from 'TURNING RIGHT' to 'FORWARD")
                             # Transition's action
                             self.reset_clock_C()
                             self.action = Action.ENTRY

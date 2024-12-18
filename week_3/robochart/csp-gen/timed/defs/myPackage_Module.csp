@@ -1,7 +1,7 @@
 
 --
 -- RoboChart generator version 3.0.0.202408051513
--- Automatically generated on 14-10-2024 14:42:16
+-- Automatically generated on 18-12-2024 16:40:59
 --
 -- Iterated compression status: true
 -- Assertions compression status: false
@@ -569,12 +569,12 @@ module myPackage_Module
 				localClockResets = {|clockReset.CLID_C|}
 				
 				
-				channel get_CLID_Turning : core_clock_type 
-				channel get_CLID_C : core_clock_type 
 				channel get_CLID_Forward : core_clock_type 
+				channel get_CLID_C : core_clock_type 
+				channel get_CLID_Turning : core_clock_type 
 				--channel increment__
 				
-				CLID_Turning_clock_type(id__,
+				CLID_Forward_clock_type(id__,
 						          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 						          const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 					let
@@ -597,7 +597,7 @@ module myPackage_Module
 				within
 					if member(max,core_clock_type) then ctype else error("core_clock_type is not wide enough")
 				
-				CLID_Forward_clock_type(id__,
+				CLID_Turning_clock_type(id__,
 						          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 						          const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 					let
@@ -1001,7 +1001,7 @@ module myPackage_Module
 							    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							    const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 						dbisim((let
-							stateClockSync = {|get_CLID_Turning,Turning::entered,get_CLID_Forward,Forward::entered|}
+							stateClockSync = {|get_CLID_Forward,Forward::entered,get_CLID_Turning,Turning::entered|}
 						 within
 							(MachineBody(id__,
 									    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
@@ -1015,7 +1015,7 @@ module myPackage_Module
 							    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							    const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 						dbisim((let
-							stateClockSync = {|get_CLID_Turning,Turning::entered,get_CLID_Forward,Forward::entered|}
+							stateClockSync = {|get_CLID_Forward,Forward::entered,get_CLID_Turning,Turning::entered|}
 						 within
 							(dbisim(
 								sbisim(
@@ -1024,17 +1024,17 @@ module myPackage_Module
 											MachineBody(id__,
 													    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 													    const_myPackage_Driving_TurtleBot3FSMRC_avel)
-											[| {|get_CLID_Forward,Forward::entered,terminate|} |]
-											dbisim(Clock_CLID_Forward(id__,0,
+											[| {|get_CLID_Turning,Turning::entered,terminate|} |]
+											dbisim(Clock_CLID_Turning(id__,0,
 													          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 													          const_myPackage_Driving_TurtleBot3FSMRC_avel))
-										)\{|get_CLID_Forward|}
+										)\{|get_CLID_Turning|}
 									)
-									[| {|get_CLID_Turning,Turning::entered,terminate|} |]
-									dbisim(Clock_CLID_Turning(id__,0,
+									[| {|get_CLID_Forward,Forward::entered,terminate|} |]
+									dbisim(Clock_CLID_Forward(id__,0,
 											          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 											          const_myPackage_Driving_TurtleBot3FSMRC_avel))
-								)\{|get_CLID_Turning|}
+								)\{|get_CLID_Forward|}
 							)
 							) \ union(stateClockSync,enteredSS)
 						)
@@ -1151,7 +1151,7 @@ module myPackage_Module
 							    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							    const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 						dbisim((let
-							stateClockSync = {|get_CLID_Turning,Turning::entered,get_CLID_Forward,Forward::entered|}
+							stateClockSync = {|get_CLID_Forward,Forward::entered,get_CLID_Turning,Turning::entered|}
 						 within
 							(MachineBody_VS_O(id__,
 									    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
@@ -1165,7 +1165,7 @@ module myPackage_Module
 							    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							    const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
 						dbisim((let
-							stateClockSync = {|get_CLID_Turning,Turning::entered,get_CLID_Forward,Forward::entered|}
+							stateClockSync = {|get_CLID_Forward,Forward::entered,get_CLID_Turning,Turning::entered|}
 						 within
 							(dbisim(
 								sbisim(
@@ -1174,17 +1174,17 @@ module myPackage_Module
 											MachineBody_VS_O(id__,
 													    const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 													    const_myPackage_Driving_TurtleBot3FSMRC_avel)
-											[| {|get_CLID_Forward,Forward::entered,terminate|} |]
-											dbisim(Clock_CLID_Forward(id__,0,
+											[| {|get_CLID_Turning,Turning::entered,terminate|} |]
+											dbisim(Clock_CLID_Turning(id__,0,
 													          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 													          const_myPackage_Driving_TurtleBot3FSMRC_avel))
-										)\{|get_CLID_Forward|}
+										)\{|get_CLID_Turning|}
 									)
-									[| {|get_CLID_Turning,Turning::entered,terminate|} |]
-									dbisim(Clock_CLID_Turning(id__,0,
+									[| {|get_CLID_Forward,Forward::entered,terminate|} |]
+									dbisim(Clock_CLID_Forward(id__,0,
 											          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 											          const_myPackage_Driving_TurtleBot3FSMRC_avel))
-								)\{|get_CLID_Turning|}
+								)\{|get_CLID_Forward|}
 							)
 							) \ diff(union(stateClockSync,enteredSS),enteredSS)
 						)
@@ -1307,23 +1307,6 @@ module myPackage_Module
 					
 					clockSync = {|get_CLID_C,clockReset.CLID_C|}
 					
-					Clock_CLID_Turning(id__,x__,
-							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-							          const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
-						TimeOut_1(
-							Turning::entered -> Clock_CLID_Turning(id__,0,
-									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-									          const_myPackage_Driving_TurtleBot3FSMRC_avel)
-							[]
-							get_CLID_Turning!x__ -> Clock_CLID_Turning(id__,x__,
-									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-									          const_myPackage_Driving_TurtleBot3FSMRC_avel)
-							[]
-							terminate -> SKIP,Clock_CLID_Turning(id__,clock_type_plus(x__,1,CLID_Turning_clock_type(id__,
-									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-									          const_myPackage_Driving_TurtleBot3FSMRC_avel)),
-									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-									          const_myPackage_Driving_TurtleBot3FSMRC_avel))
 					Clock_CLID_Forward(id__,x__,
 							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							          const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
@@ -1341,19 +1324,36 @@ module myPackage_Module
 									          const_myPackage_Driving_TurtleBot3FSMRC_avel)),
 									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 									          const_myPackage_Driving_TurtleBot3FSMRC_avel))
+					Clock_CLID_Turning(id__,x__,
+							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
+							          const_myPackage_Driving_TurtleBot3FSMRC_avel) = 
+						TimeOut_1(
+							Turning::entered -> Clock_CLID_Turning(id__,0,
+									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
+									          const_myPackage_Driving_TurtleBot3FSMRC_avel)
+							[]
+							get_CLID_Turning!x__ -> Clock_CLID_Turning(id__,x__,
+									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
+									          const_myPackage_Driving_TurtleBot3FSMRC_avel)
+							[]
+							terminate -> SKIP,Clock_CLID_Turning(id__,clock_type_plus(x__,1,CLID_Turning_clock_type(id__,
+									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
+									          const_myPackage_Driving_TurtleBot3FSMRC_avel)),
+									          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
+									          const_myPackage_Driving_TurtleBot3FSMRC_avel))
 					
 					StateClocks(id__,
 							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
-							          const_myPackage_Driving_TurtleBot3FSMRC_avel) = dbisim(Clock_CLID_Turning(id__,0,
+							          const_myPackage_Driving_TurtleBot3FSMRC_avel) = dbisim(Clock_CLID_Forward(id__,0,
 							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							          const_myPackage_Driving_TurtleBot3FSMRC_avel))
 					[| { terminate } |] (
-					dbisim(Clock_CLID_Forward(id__,0,
+					dbisim(Clock_CLID_Turning(id__,0,
 							          const_myPackage_Driving_TurtleBot3FSMRC_lvel,
 							          const_myPackage_Driving_TurtleBot3FSMRC_avel))
 					)
 					
-					stateClockSync = {|get_CLID_Turning,Turning::entered,get_CLID_Forward,Forward::entered|}
+					stateClockSync = {|get_CLID_Forward,Forward::entered,get_CLID_Turning,Turning::entered|}
 					
 					-- Shared memory
 					-- Shared memory variables
