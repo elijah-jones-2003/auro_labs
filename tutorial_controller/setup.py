@@ -20,7 +20,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "test_node = tutorial_controller.my_first_node:main"
+            "test_node = tutorial_controller.my_first_node:main",
+            "draw_circle = tutorial_controller.draw_circle:main",
+            "pose_sub = tutorial_controller.pose_sub:main"
         ],
     },
 )
