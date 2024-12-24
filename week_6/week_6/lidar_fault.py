@@ -29,9 +29,9 @@ class LiDARFault(Node):
 
         if random.random() < fault_probability:
             for i, range in enumerate(msg_faulty.ranges):
-                msg_faulty.ranges[i] = float('inf') # Never detect an obstacle
+                # msg_faulty.ranges[i] = float('inf') # Never detect an obstacle
                 # msg_faulty.ranges[i] = 0 # Always detect an obstacle
-                # msg_faulty.ranges[i] = random.gauss(msg_faulty.ranges[i], 0.2) # Gaussian noise centred on true reading, with some standard deviation
+                msg_faulty.ranges[i] = random.gauss(msg_faulty.ranges[i], 0.2) # Gaussian noise centred on true reading, with some standard deviation
                 # msg_faulty.ranges[i] = msg_faulty.ranges[i] / 2 # Obstacles appear twice as close as they really are
 
         self.scan_publisher.publish(msg_faulty)
