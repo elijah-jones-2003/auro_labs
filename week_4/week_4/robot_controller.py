@@ -19,12 +19,14 @@ from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.qos import QoSPresetProfiles
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 from std_msgs.msg import Float32
 from geometry_msgs.msg import Twist, Pose
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from auro_interfaces.msg import StringWithPose, Item, ItemList
+from auro_interfaces.srv import ItemRequest
 
 from tf_transformations import euler_from_quaternion
 import angles
@@ -70,6 +72,12 @@ class RobotController(Node):
         self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
         self.items = ItemList()
 
+        client_callback_group = MutuallyExclusiveCallbackGroup()
+        self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
+
+        self.declare_parameter('robot_id', 'robot1')
+        self.robot_id = self.get_parameter('robot_id').value
+
         self.item_subscriber = self.create_subscription(
             ItemList,
             '/items',
@@ -105,6 +113,7 @@ class RobotController(Node):
             '/scan',
             self.scan_callback,
             QoSPresetProfiles.SENSOR_DATA.value)
+    
 
         # Publishes Twist messages (linear and angular velocities) on the /cmd_vel topic
         # http://docs.ros.org/en/noetic/api/geometry_msgs/html/msg/Twist.html
@@ -130,6 +139,19 @@ class RobotController(Node):
 
     def item_callback(self, msg):
         self.items = msg
+        # if msg.x > 0:
+        #     self.state = State.TURNING
+        #     self.turn_angle = random.uniform(30)
+        #     self.turn_direction = TURN_LEFT
+        #     self.get_logger().info("Object found, turning to face")
+        # elif msg.x < 0:
+        #     self.state = State.TURNING
+        #     self.turn_angle = random.uniform(30)
+        #     self.turn_direction = TURN_RIGHT
+        #     self.get_logger().info("Object found, turning to face")
+        # else:
+        #     pass
+            
 
     # Called every time odom_subscriber receives an Odometry message from the /odom topic
     #
@@ -275,13 +297,31 @@ class RobotController(Node):
                 
                 item = self.items.data[0]
 
-                estimated_distance = 69.0 * float(item.diameter) ** -0.89
+                estimated_distance = 32.4 * float(item.diameter) ** -0.75 
+
+                if estimated_distance <= 0.35:
+                    rqt = ItemRequest.Request()
+                    rqt.robot_id = self.robot_id
+                    try:
+                        future = self.pick_up_service.call_async(rqt)
+                        self.executor.spin_until_future_complete(future)
+                        response = future.result()
+                        if response.success:
+                            self.get_logger().info('Item picked up.')
+                            self.state = State.FORWARD
+                            self.items.data = []
+                        else:
+                            self.get_logger().info('Unable to pick up item: ' + response.message)
+                    except Exception as e:
+                        self.get_logger().info('Exception ' + e)   
 
                 msg = Twist()
                 msg.linear.x = 0.25 * estimated_distance
                 msg.angular.z = item.x / 320.0
+                self.cmd_vel_publisher.publish(msg)
 
                 self.cmd_vel_publisher.publish(msg)
+                self.get_logger().info("Object found")
 
             case _:
                 pass

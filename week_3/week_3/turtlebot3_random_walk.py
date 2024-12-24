@@ -90,11 +90,12 @@ class TurtleBot3RandomWalk(Node):
                 delay = 3
                 time_difference = self.get_clock().now() - self.time_elapsed
                 self.get_logger().info(f"Starting robot controller in {delay} seconds...")
-
+                self.state = State.FORWARD
                 if time_difference > Duration(seconds = delay):
                     self.get_logger().info(f"STARTED")
                     self.previous_pose = self.pose
                     self.state = State.FORWARD
+
 
             case State.FORWARD:
                 msg = Twist()
