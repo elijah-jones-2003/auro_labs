@@ -4,13 +4,17 @@ import rclpy
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import ExternalShutdownException
-from assessment_interfaces.msg import RobotList, ItemList, ZoneList
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from assessment_interfaces.msg import RobotList, ItemList, ZoneList 
+
+from auro_interfaces.msg import StringWithPose
+from auro_interfaces.srv import ItemRequest
+
 import math
 import random
 from geometry_msgs.msg import Twist, Pose
 from std_msgs.msg import String
-from auro_interfaces.srv import ItemRequest
-from auro_interfaces.msg import StringWithPose
+
 import angles
 from enum import Enum
 from tf_transformations import euler_from_quaternion
@@ -35,8 +39,7 @@ class State(Enum):
     FORWARD = 0
     TURNING = 1
     COLLECTING = 2
-
-
+    DEPOSITING = 3
 
 class RobotController(Node):
 
@@ -53,6 +56,7 @@ class RobotController(Node):
         self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
         self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
         self.items = ItemList()
+        self.holding_Item = False
 
         self.declare_parameter('robot_id', 'robot1')
         self.robot_id = self.get_parameter('robot_id').value
@@ -67,6 +71,13 @@ class RobotController(Node):
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
+
+        # Services
+        client_callback_group = MutuallyExclusiveCallbackGroup()
+        timer_callback_group = MutuallyExclusiveCallbackGroup()
+
+        self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
+        self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
@@ -161,9 +172,14 @@ class RobotController(Node):
                         self.get_logger().info(f"Detected obstacle to the right, turning left by {self.turn_angle} degrees")
                     return
 
-                if len(self.items.data) > 0:
-                    self.state = State.COLLECTING
-                    return
+                if not self.holding_Item:
+                    if len(self.items.data) > 0:
+                        self.state = State.COLLECTING
+                        return
+                else:
+                    if len(self.zones.data) > 0:
+                        self.state = State.DEPOSITING
+                        return
 
                 msg = Twist()
                 msg.linear.x = LINEAR_VELOCITY
@@ -183,9 +199,14 @@ class RobotController(Node):
             case State.TURNING:
                 self.get_logger().info("Turning state")
 
-                if len(self.items.data) > 0:
-                    self.state = State.COLLECTING
-                    return
+                if not self.holding_Item:
+                    if len(self.items.data) > 0:
+                        self.state = State.COLLECTING
+                        return
+                else:
+                    if len(self.zones.data) > 0:
+                        self.state = State.DEPOSITING
+                        return
 
                 msg = Twist()
                 msg.angular.z = self.turn_direction * ANGULAR_VELOCITY
@@ -206,8 +227,11 @@ class RobotController(Node):
                     return
 
                 item = self.items.data[0]
+                # closest_item = item
+                # for item in self.items.data:
+                #     if item.diameter < closest_item.diameter:
+                #         closest_item = item
 
-                # Obtained by curve fitting from experimental runs.
                 estimated_distance = 32.4 * float(item.diameter) ** -0.75
 
                 self.get_logger().info(f'Estimated distance {estimated_distance}')
@@ -221,10 +245,44 @@ class RobotController(Node):
                         response = future.result()
                         if response.success:
                             self.get_logger().info('Item picked up.')
-                            self.state = State.FORWARD
+                            self.holding_Item = True
+                            self.state = State.DEPOSITING
                             self.items.data = []
                         else:
                             self.get_logger().info('Unable to pick up item: ' + response.message)
+                    except Exception as e:
+                        self.get_logger().info('Exception ' + str(e))
+
+                msg = Twist()
+                msg.linear.x = 0.25 * estimated_distance
+                msg.angular.z = item.x / 320.0
+                self.cmd_vel_publisher.publish(msg)
+
+            case State.DEPOSITING:
+                if len(self.zones.data) == 0:
+                    self.previous_pose = self.pose
+                    self.state = State.TURNING
+                    return
+
+                zone = self.items.data[0]
+
+                estimated_distance = 32.4 * float(zone.diameter) ** -0.75
+
+                self.get_logger().info(f'Estimated distance {estimated_distance}')
+
+                if estimated_distance <= 0:
+                    rqt = ItemRequest.Request()
+                    rqt.robot_id = self.robot_id
+                    try:
+                        future = self.offload_service.call_async(rqt)
+                        self.executor.spin_until_future_complete(future)
+                        response = future.result()
+                        if response.success:
+                            self.get_logger().info('Item dropped in zone.')
+                            self.state = State.TURNING
+                            self.zones.data = []
+                        else:
+                            self.get_logger().info('Unable to deposit item: ' + response.message)
                     except Exception as e:
                         self.get_logger().info('Exception ' + str(e))
 
