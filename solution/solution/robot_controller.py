@@ -46,6 +46,17 @@ class RobotController(Node):
         self.state = State.FORWARD
         self.pose = Pose()
 
+        self.previous_pose = Pose() # Store a snapshot of the pose for comparison against future poses
+        self.previous_yaw = 0.0 # Snapshot of the angle for comparison against future angles
+        self.turn_angle = 0.0 # Relative angle to turn to in the TURNING state
+        self.turn_direction = TURN_LEFT # Direction to turn in the TURNING state
+        self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
+        self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
+        self.items = ItemList()
+
+        self.declare_parameter('robot_id', 'robot1')
+        self.robot_id = self.get_parameter('robot_id').value
+
         self.declare_parameter('x', 0.0)
         self.declare_parameter('y', 0.0)
         self.declare_parameter('yaw', 0.0)
@@ -59,6 +70,7 @@ class RobotController(Node):
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
+        self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
 
         # Subscribers
         self.robot_subscriber = self.create_subscription(
