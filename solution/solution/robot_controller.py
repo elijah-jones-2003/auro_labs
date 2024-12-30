@@ -48,6 +48,9 @@ class RobotController(Node):
 
         self.state = State.FORWARD
         self.pose = Pose()
+        self.yaw = self.pose.orientation.z
+        self.x = self.pose.position.x
+        self.y = self.pose.position.y
 
         self.previous_pose = Pose() # Store a snapshot of the pose for comparison against future poses
         self.previous_yaw = 0.0 # Snapshot of the angle for comparison against future angles
@@ -56,7 +59,7 @@ class RobotController(Node):
         self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
         self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
         self.items = ItemList()
-        self.holding_Item = False
+        self.holding_item = False
 
         self.declare_parameter('robot_id', 'robot1')
         self.robot_id = self.get_parameter('robot_id').value
@@ -88,19 +91,22 @@ class RobotController(Node):
             RobotList,
             'robots',
             self.robot_callback,
-            10)
+            10,
+            callback_group=timer_callback_group)
         
         self.item_subscriber = self.create_subscription(
             ItemList, 
             'items', 
             self.item_callback,
-            10)
+            10,
+            callback_group=timer_callback_group) 
         
         self.zone_list_subscriber = self.create_subscription(
             ZoneList, 
             'zone', 
             self.zone_callback, 
-            10)
+            10,
+            callback_group=timer_callback_group)
 
     def item_callback(self, msg):
         self.items = msg
@@ -139,7 +145,7 @@ class RobotController(Node):
         
 
     def control_loop(self):
-        self.get_logger().info(f"Initial pose - x: {self.initial_x}, y: {self.initial_y}, yaw: {self.initial_yaw}")
+        # self.get_logger().info(f"Current pose - x: {self.x}, y: {self.x}, yaw: {self.yaw}")
         # Send message to rviz_text_marker node
         marker_input = StringWithPose()
         marker_input.text = str(self.state)  # Visualise robot state as an RViz marker
@@ -172,7 +178,7 @@ class RobotController(Node):
                         self.get_logger().info(f"Detected obstacle to the right, turning left by {self.turn_angle} degrees")
                     return
 
-                if not self.holding_Item:
+                if not self.holding_item:
                     if len(self.items.data) > 0:
                         self.state = State.COLLECTING
                         return
@@ -199,7 +205,7 @@ class RobotController(Node):
             case State.TURNING:
                 self.get_logger().info("Turning state")
 
-                if not self.holding_Item:
+                if not self.holding_item:
                     if len(self.items.data) > 0:
                         self.state = State.COLLECTING
                         return
@@ -221,6 +227,7 @@ class RobotController(Node):
                     self.get_logger().info(f"Finished turning, driving forward by {self.goal_distance:.2f} metres")
 
             case State.COLLECTING:
+                self.get_logger().info("Collecting state")  
                 if len(self.items.data) == 0:
                     self.previous_pose = self.pose
                     self.state = State.FORWARD
@@ -245,7 +252,7 @@ class RobotController(Node):
                         response = future.result()
                         if response.success:
                             self.get_logger().info('Item picked up.')
-                            self.holding_Item = True
+                            self.holding_item = True
                             self.state = State.DEPOSITING
                             self.items.data = []
                         else:
@@ -254,19 +261,20 @@ class RobotController(Node):
                         self.get_logger().info('Exception ' + str(e))
 
                 msg = Twist()
-                msg.linear.x = 0.25 * estimated_distance
+                msg.linear.x = LINEAR_VELOCITY
                 msg.angular.z = item.x / 320.0
                 self.cmd_vel_publisher.publish(msg)
 
             case State.DEPOSITING:
+                self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
                     self.previous_pose = self.pose
-                    self.state = State.TURNING
+                    self.state = State.FORWARD
                     return
 
-                zone = self.items.data[0]
+                zone = self.zones.data[0]
 
-                estimated_distance = 32.4 * float(zone.diameter) ** -0.75
+                estimated_distance = math.sqrt((zone.x - self.x)**2 + (zone.y - self.y)**2)
 
                 self.get_logger().info(f'Estimated distance {estimated_distance}')
 
@@ -279,6 +287,7 @@ class RobotController(Node):
                         response = future.result()
                         if response.success:
                             self.get_logger().info('Item dropped in zone.')
+                            self.holding_item = False
                             self.state = State.TURNING
                             self.zones.data = []
                         else:
@@ -287,8 +296,8 @@ class RobotController(Node):
                         self.get_logger().info('Exception ' + str(e))
 
                 msg = Twist()
-                msg.linear.x = 0.25 * estimated_distance
-                msg.angular.z = item.x / 320.0
+                msg.linear.x = LINEAR_VELOCITY
+                msg.angular.z = zone.x / 320.0
                 self.cmd_vel_publisher.publish(msg)
 
             case _:
