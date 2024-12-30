@@ -81,7 +81,7 @@ class RobotController(Node):
 
         self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
         self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
-
+        
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
@@ -244,6 +244,7 @@ class RobotController(Node):
                 self.get_logger().info(f'Estimated distance {estimated_distance}')
 
                 if estimated_distance <= 0.35:
+                    self.get_logger().info('within range to pick item up.')
                     rqt = ItemRequest.Request()
                     rqt.robot_id = self.robot_id
                     try:
@@ -269,16 +270,16 @@ class RobotController(Node):
                 self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
                     self.previous_pose = self.pose
-                    self.state = State.FORWARD
+                    self.state = State.TURNING
                     return
 
                 zone = self.zones.data[0]
 
-                estimated_distance = math.sqrt((zone.x - self.x)**2 + (zone.y - self.y)**2)
+                estimated_distance = 32.4 * float(zone.size) ** -0.75
 
                 self.get_logger().info(f'Estimated distance {estimated_distance}')
 
-                if estimated_distance <= 0:
+                if estimated_distance <= 32.4:
                     rqt = ItemRequest.Request()
                     rqt.robot_id = self.robot_id
                     try:
@@ -286,14 +287,14 @@ class RobotController(Node):
                         self.executor.spin_until_future_complete(future)
                         response = future.result()
                         if response.success:
-                            self.get_logger().info('Item dropped in zone.')
+                            print('Item offloaded.')
                             self.holding_item = False
-                            self.state = State.TURNING
                             self.zones.data = []
+                            self.state = State.TURNING 
                         else:
-                            self.get_logger().info('Unable to deposit item: ' + response.message)
+                            print('Unable to offload item.' + response.message)
                     except Exception as e:
-                        self.get_logger().info('Exception ' + str(e))
+                        print(e)
 
                 msg = Twist()
                 msg.linear.x = LINEAR_VELOCITY
