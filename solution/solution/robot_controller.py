@@ -85,6 +85,7 @@ class RobotController(Node):
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.goal_publisher = self.create_publisher(Pose, 'goal', 10)
 
         # Subscribers
         self.robot_subscriber = self.create_subscription(
@@ -291,6 +292,7 @@ class RobotController(Node):
                             self.holding_item = False
                             self.zones.data = []
                             self.state = State.TURNING 
+                            self.turn_angle = 180
                         else:
                             print('Unable to offload item.' + response.message)
                     except Exception as e:

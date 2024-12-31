@@ -10,13 +10,12 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from nav2_common.launch import ReplaceString
-
+from launch.substitutions import TextSubstitution
 
 def rviz_action(context : LaunchContext):
 
     namespace = context.launch_configurations['ros_namespace']
     rviz_config_file = context.launch_configurations['rviz_config']
-
     namespaced_rviz_config_file = ReplaceString(
             source_file=rviz_config_file,
             replacements={'<robot_namespace>': namespace})
