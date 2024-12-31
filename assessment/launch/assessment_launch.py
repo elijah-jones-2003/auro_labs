@@ -197,6 +197,7 @@ def group_action(context : LaunchContext):
                 executable='robot_sensor',
                 output='screen')
         ])
+
     
         bringup_cmd_group.append(group)
 
@@ -215,11 +216,17 @@ def generate_launch_description():
     item_manager = LaunchConfiguration('item_manager')
     random_seed = LaunchConfiguration('random_seed')
     use_nav2 = LaunchConfiguration('use_nav2')
+    nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
     map_yaml_file = LaunchConfiguration('map')
     params_file = LaunchConfiguration('params_file')
     headless = LaunchConfiguration('headless')
     limit_real_time_factor = LaunchConfiguration('limit_real_time_factor')
     wait_for_items = LaunchConfiguration('wait_for_items')
+
+    nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
+    map = os.path.join(get_package_share_directory(package_name),
+                       'maps',
+                       'auro_map.yaml')
 
     # Zone configuration
     zone_top_left = LaunchConfiguration('zone_top_left')
@@ -304,7 +311,7 @@ def generate_launch_description():
     
     declare_rviz_config_file_cmd = DeclareLaunchArgument(
         'rviz_config',
-        default_value=PathJoinSubstitution([FindPackageShare(package_name), 'rviz', 'namespaced.rviz']),
+        default_value=PathJoinSubstitution([FindPackageShare(package_name), 'rviz', 'namespaced_nav2.rviz']),
         description='Full path to the RViz config file to use')
     
     declare_rviz_windows_cmd = DeclareLaunchArgument(
@@ -329,7 +336,7 @@ def generate_launch_description():
     
     declare_use_nav2_cmd = DeclareLaunchArgument(
         'use_nav2',
-        default_value='False',
+        default_value='True',
         description='Whether to use the navigation stack (Nav2)')
     
     declare_headless_cmd = DeclareLaunchArgument(
@@ -371,6 +378,7 @@ def generate_launch_description():
         parameters=[{'zone_top_left': zone_top_left, 'zone_top_right': zone_top_right, 'zone_bottom_left': zone_bottom_left, 'zone_bottom_right':zone_bottom_right}])
 
     bringup_cmd_group = OpaqueFunction(function=group_action)
+
         
     ld = LaunchDescription()
 
