@@ -223,11 +223,6 @@ def generate_launch_description():
     limit_real_time_factor = LaunchConfiguration('limit_real_time_factor')
     wait_for_items = LaunchConfiguration('wait_for_items')
 
-    nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
-    map = os.path.join(get_package_share_directory(package_name),
-                       'maps',
-                       'auro_map.yaml')
-
     # Zone configuration
     zone_top_left = LaunchConfiguration('zone_top_left')
     zone_top_right = LaunchConfiguration('zone_top_right')
@@ -378,7 +373,6 @@ def generate_launch_description():
         parameters=[{'zone_top_left': zone_top_left, 'zone_top_right': zone_top_right, 'zone_bottom_left': zone_bottom_left, 'zone_bottom_right':zone_bottom_right}])
 
     bringup_cmd_group = OpaqueFunction(function=group_action)
-
         
     ld = LaunchDescription()
 

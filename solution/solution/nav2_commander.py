@@ -7,7 +7,7 @@ from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.duration import Duration
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
 from enum import Enum
@@ -34,12 +34,19 @@ class SimpleCommander(Node):
         initial_pose.pose.orientation.w = 1.0
         self.navigator.setInitialPose(initial_pose)
 
+        self.goal_pose = Pose()
+
         self.state = State.SET_GOAL
 
         self.navigator.waitUntilNav2Active()
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
+        self.goal_pose_subscription = self.create_subscription(
+            Pose, 'goal_pose', self.goal_pose_callback, 10)
+        
+    def goal_pose_callback(self, msg):
+        self.goal_pose = msg
 
 
     def control_loop(self):
@@ -48,12 +55,13 @@ class SimpleCommander(Node):
 
             case State.SET_GOAL:
 
-                goal_pose = PoseStamped()
+                goal_pose = self.goal_pose
                 goal_pose.header.frame_id = 'map'
                 goal_pose.header.stamp = self.get_clock().now().to_msg()
-                goal_pose.pose.position.x = 0.0
-                goal_pose.pose.position.y = 2.0
-                goal_pose.pose.orientation.w = 1.0
+                # Setting pose here
+                # goal_pose.pose.position.x = 0.0
+                # goal_pose.pose.position.y = 2.0
+                # goal_pose.pose.orientation.w = 1.0
 
                 self.navigator.goToPose(goal_pose)
 

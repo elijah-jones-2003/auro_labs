@@ -7,12 +7,15 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from assessment_interfaces.msg import RobotList, ItemList, ZoneList 
 
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+from rclpy.duration import Duration
+
 from auro_interfaces.msg import StringWithPose
 from auro_interfaces.srv import ItemRequest
 
 import math
 import random
-from geometry_msgs.msg import Twist, Pose
+from geometry_msgs.msg import Twist, Pose, PoseStamped
 from std_msgs.msg import String
 
 import angles
@@ -40,6 +43,7 @@ class State(Enum):
     TURNING = 1
     COLLECTING = 2
     DEPOSITING = 3
+    NAVIGATING = 4
 
 class RobotController(Node):
 
@@ -47,12 +51,17 @@ class RobotController(Node):
         super().__init__('robot_controller')
 
         self.state = State.FORWARD
-        self.pose = Pose()
-        self.yaw = self.pose.orientation.z
-        self.x = self.pose.position.x
-        self.y = self.pose.position.y
+        self.navigator = BasicNavigator()
 
-        self.previous_pose = Pose() # Store a snapshot of the pose for comparison against future poses
+        self.pose = PoseStamped()
+        self.pose.header.frame_id = 'map'
+        self.pose.header.stamp = self.get_clock().now().to_msg()
+        self.yaw = self.pose.pose.orientation.z
+        self.x = self.pose.pose.position.x
+        self.y = self.pose.pose.position.y
+        self.navigator.setInitialPose(self.pose)
+
+        self.previous_pose = PoseStamped() # Store a snapshot of the pose for comparison against future poses
         self.previous_yaw = 0.0 # Snapshot of the angle for comparison against future angles
         self.turn_angle = 0.0 # Relative angle to turn to in the TURNING state
         self.turn_direction = TURN_LEFT # Direction to turn in the TURNING state
@@ -85,7 +94,6 @@ class RobotController(Node):
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
-        self.goal_publisher = self.create_publisher(Pose, 'goal', 10)
 
         # Subscribers
         self.robot_subscriber = self.create_subscription(
@@ -119,12 +127,12 @@ class RobotController(Node):
         self.zones = msg   
 
     def odom_callback(self, msg):
-        self.pose = msg.pose.pose 
+        self.pose.pose = msg.pose.pose 
 
-        (roll, pitch, yaw) = euler_from_quaternion([self.pose.orientation.x,
-                                                    self.pose.orientation.y,
-                                                    self.pose.orientation.z,
-                                                    self.pose.orientation.w])
+        (roll, pitch, yaw) = euler_from_quaternion([self.pose.pose.orientation.x,
+                                                    self.pose.pose.orientation.y,
+                                                    self.pose.pose.orientation.z,
+                                                    self.pose.pose.orientation.w])
         
         self.yaw = yaw 
     
@@ -150,7 +158,7 @@ class RobotController(Node):
         # Send message to rviz_text_marker node
         marker_input = StringWithPose()
         marker_input.text = str(self.state)  # Visualise robot state as an RViz marker
-        marker_input.pose = self.pose  # Set the pose of the RViz marker to track the robot's pose
+        marker_input.pose = self.pose.pose  # Set the pose of the RViz marker to track the robot's pose
         self.marker_publisher.publish(marker_input)
 
         match self.state:
@@ -192,8 +200,8 @@ class RobotController(Node):
                 msg.linear.x = LINEAR_VELOCITY
                 self.cmd_vel_publisher.publish(msg)
 
-                difference_x = self.pose.position.x - self.previous_pose.position.x
-                difference_y = self.pose.position.y - self.previous_pose.position.y
+                difference_x = self.pose.pose.position.x - self.previous_pose.position.x
+                difference_y = self.pose.pose.position.y - self.previous_pose.position.y
                 distance_travelled = math.sqrt(difference_x ** 2 + difference_y ** 2)
 
                 if distance_travelled >= self.goal_distance:
@@ -222,7 +230,7 @@ class RobotController(Node):
                 yaw_difference = angles.normalize_angle(self.yaw - self.previous_yaw)
 
                 if math.fabs(yaw_difference) >= math.radians(self.turn_angle):
-                    self.previous_pose = self.pose
+                    self.previous_pose = self.pose.pose
                     self.goal_distance = random.uniform(1.0, 2.0)
                     self.state = State.FORWARD
                     self.get_logger().info(f"Finished turning, driving forward by {self.goal_distance:.2f} metres")
@@ -230,7 +238,7 @@ class RobotController(Node):
             case State.COLLECTING:
                 self.get_logger().info("Collecting state")  
                 if len(self.items.data) == 0:
-                    self.previous_pose = self.pose
+                    self.previous_pose = self.pose.pose
                     self.state = State.FORWARD
                     return
 
@@ -240,37 +248,69 @@ class RobotController(Node):
                 #     if item.diameter < closest_item.diameter:
                 #         closest_item = item
 
+                goal_pose = PoseStamped()
+
                 estimated_distance = 32.4 * float(item.diameter) ** -0.75
 
-                self.get_logger().info(f'Estimated distance {estimated_distance}')
+                # self.get_logger().info(f'Estimated distance {estimated_distance}')
 
-                if estimated_distance <= 0.35:
-                    self.get_logger().info('within range to pick item up.')
-                    rqt = ItemRequest.Request()
-                    rqt.robot_id = self.robot_id
-                    try:
-                        future = self.pick_up_service.call_async(rqt)
-                        self.executor.spin_until_future_complete(future)
-                        response = future.result()
-                        if response.success:
-                            self.get_logger().info('Item picked up.')
-                            self.holding_item = True
-                            self.state = State.DEPOSITING
-                            self.items.data = []
-                        else:
-                            self.get_logger().info('Unable to pick up item: ' + response.message)
-                    except Exception as e:
-                        self.get_logger().info('Exception ' + str(e))
+                # if estimated_distance <= 0.35:
+                #     self.get_logger().info('within range to pick item up.')
+                #     rqt = ItemRequest.Request()
+                #     rqt.robot_id = self.robot_id
+                #     try:
+                #         future = self.pick_up_service.call_async(rqt)
+                #         self.executor.spin_until_future_complete(future)
+                #         response = future.result()
+                #         if response.success:
+                #             self.get_logger().info('Item picked up.')
+                #             self.holding_item = True
+                #             self.state = State.DEPOSITING
+                #             self.items.data = []
+                #         else:
+                #             self.get_logger().info('Unable to pick up item: ' + response.message)
+                #     except Exception as e:
+                #         self.get_logger().info('Exception ' + str(e))
 
-                msg = Twist()
-                msg.linear.x = LINEAR_VELOCITY
-                msg.angular.z = item.x / 320.0
-                self.cmd_vel_publisher.publish(msg)
+                goal_pose.header.frame_id = 'map'
+                goal_pose.header.stamp = self.get_clock().now().to_msg()
+
+                # msg = Twist()
+                # msg.linear.x = LINEAR_VELOCITY
+                # msg.angular.z = item.x / 320.0
+                # self.cmd_vel_publisher.publish(msg)
+                goal_pose.pose.position.x = 0.0
+                goal_pose.pose.position.y = 2.0
+                goal_pose.pose.orientation.w = 1.0
+
+                self.navigator.goToPose(goal_pose)
+                self.state = State.NAVIGATING
+
+
+            case State.NAVIGATING:
+
+                if not self.navigator.isTaskComplete():
+                    feedback = self.navigator.getFeedback()
+                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
+                else:
+
+                    result = self.navigator.getResult()
+                    print
+
+                    if result == TaskResult.SUCCEEDED:
+                        print('Goal succeeded!')
+                    elif result == TaskResult.CANCELED:
+                        print('Goal was canceled!')
+                    elif result == TaskResult.FAILED:
+                        print('Goal failed!')
+                    else:
+                        print('Goal has an invalid return status!')
+            
 
             case State.DEPOSITING:
                 self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
-                    self.previous_pose = self.pose
+                    self.previous_pose = self.pose.pose
                     self.state = State.TURNING
                     return
 
