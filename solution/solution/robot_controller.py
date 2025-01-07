@@ -51,15 +51,18 @@ class RobotController(Node):
     def __init__(self):
         super().__init__('robot_controller')
 
-        self.state = State.FORWARD
+        self.state = State.SET_GOAL
         self.navigator = BasicNavigator()
 
         self.pose = PoseStamped()
         self.pose.header.frame_id = 'map'
         self.pose.header.stamp = self.get_clock().now().to_msg()
-        # self.yaw = self.pose.pose.orientation.z
-        # self.x = self.pose.pose.position.x
-        # self.y = self.pose.pose.position.y
+
+        # TODO: Set initial pose based on parameters
+
+        self.pose.pose.orientation.z = 0.0
+        self.pose.pose.position.x = -3.5
+        self.pose.pose.position.y = 0.0
         self.navigator.setInitialPose(self.pose)
         self.navigator.waitUntilNav2Active()
 
@@ -71,12 +74,15 @@ class RobotController(Node):
         self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
         self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
         self.items = ItemList()
+        self.robots = RobotList()
+        self.zones = ZoneList()
         self.holding_item = False
 
+    # TODO Make robot_id work
         self.declare_parameter('robot_id', 'robot1')
         self.robot_id = self.get_parameter('robot_id').value
 
-        self.declare_parameter('x', 0.0)
+        self.declare_parameter('x', -3.5)
         self.declare_parameter('y', 0.0)
         self.declare_parameter('yaw', 0.0)
 
@@ -155,11 +161,10 @@ class RobotController(Node):
         
 
     def control_loop(self):
-        # self.get_logger().info(f"Current pose - x: {self.x}, y: {self.x}, yaw: {self.yaw}")
         # Send message to rviz_text_marker node
         marker_input = StringWithPose()
-        marker_input.text = str(self.state)  # Visualise robot state as an RViz marker
-        marker_input.pose = self.pose.pose  # Set the pose of the RViz marker to track the robot's pose
+        marker_input.text = str(self.state)
+        marker_input.pose = self.pose.pose 
         self.marker_publisher.publish(marker_input)
 
         match self.state:
@@ -243,19 +248,36 @@ class RobotController(Node):
             case State.SET_GOAL:
                 goal = None
                 if not self.holding_item:
-                    goal = self.items.data[0]
+                    if len(self.items.data) == 0:
+                        self.state = State.FORWARD
+                        return
+                    else:
+                        goal = self.items.data[0]
                 else:
-                    goal = self.zones.data[0]
+                    if len(self.zones.data) == 0:
+                        self.state = State.FORWARD
+                        return
+                    else:
+                        goal = self.zones.data[0]
                     pass
 
                 goal_pose = PoseStamped()
                 goal_pose.header.frame_id = 'map'
                 goal_pose.header.stamp = self.get_clock().now().to_msg()
-                
-                goal_pose.pose.position.x = 0.0
-                goal_pose.pose.position.y = 2.0
-                goal_pose.pose.orientation.w = 1.0
 
+                # Calculate the estimated distance and angle to the goal
+                estimated_distance = 32.4 * float(goal.diameter) ** - 0.75
+                estimated_angle = math.radians(self.pose.pose.orientation.z + math.atan2(goal.x, estimated_distance))
+                print(f'Estimated distance: {estimated_distance}, angle: {estimated_angle}')
+
+                # Set the goal pose position
+                goal_pose.pose.position.x = self.pose.pose.position.x + estimated_distance * math.cos(estimated_angle)
+                goal_pose.pose.position.y = self.pose.pose.position.y + estimated_distance * math.sin(estimated_angle)
+
+                # Set the goal pose orientation
+                goal_pose.pose.orientation.z = self.pose.pose.orientation.z
+
+                # Move to goal
                 self.navigator.goToPose(goal_pose)
                 self.state = State.NAVIGATING 
 
@@ -264,16 +286,12 @@ class RobotController(Node):
                     feedback = self.navigator.getFeedback()
                     print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
                 else:
-
                     result = self.navigator.getResult()
-                    print
-
                     if result == TaskResult.SUCCEEDED:
                         print('Goal succeeded!')
-                        if not self.holding_item:
-                            if len(self.items.data) > 0:
-                                self.state = State.COLLECTING
-                                return
+                        if not self.holding_item:   
+                            self.state = State.COLLECTING
+                            return
                         else:
                             if len(self.zones.data) > 0:
                                 self.state = State.DEPOSITING
@@ -292,79 +310,54 @@ class RobotController(Node):
                         print('Goal has an invalid return status!')
 
             case State.COLLECTING:
-                self.get_logger().info("Collecting state")  
+                self.get_logger().info("Collecting state") 
                 if len(self.items.data) == 0:
                     self.previous_pose.pose = self.pose.pose
                     self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.FORWARD
-                    return
-
-                item = self.items.data[0]
-                # closest_item = item
-                # for item in self.items.data:
-                #     if item.diameter < closest_item.diameter:
-                #         closest_item = item
-
-                goal_pose = PoseStamped()
-
-                estimated_distance = 32.4 * float(item.diameter) ** -0.75
-
-                # self.get_logger().info(f'Estimated distance {estimated_distance}')
-
-                # if estimated_distance <= 0.35:
-                #     self.get_logger().info('within range to pick item up.')
-                #     rqt = ItemRequest.Request()
-                #     rqt.robot_id = self.robot_id
-                #     try:
-                #         future = self.pick_up_service.call_async(rqt)
-                #         self.executor.spin_until_future_complete(future)
-                #         response = future.result()
-                #         if response.success:
-                #             self.get_logger().info('Item picked up.')
-                #             self.holding_item = True
-                #             self.state = State.DEPOSITING
-                #             self.items.data = []
-                #         else:
-                #             self.get_logger().info('Unable to pick up item: ' + response.message)
-                #     except Exception as e:
-                #         self.get_logger().info('Exception ' + str(e))
+                    return 
+                rqt = ItemRequest.Request()
+                rqt.robot_id = self.robot_id
+                try:
+                    future = self.pick_up_service.call_async(rqt)
+                    self.executor.spin_until_future_complete(future)
+                    response = future.result()
+                    if response.success:
+                        self.get_logger().info('Item picked up.')
+                        self.holding_item = True
+                        self.state = State.SET_GOAL
+                        self.items.data = []
+                    else:
+                        self.get_logger().info('Unable to pick up item: ' + response.message)
+                        self.state = State.FORWARD
+                except Exception as e:
+                    self.get_logger().info('Exception ' + str(e))
             
             case State.DEPOSITING:
                 self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
                     self.previous_pose.pose = self.pose.pose
                     self.previous_pose.header.stamp = self.get_clock().now().to_msg()
-                    self.state = State.TURNING
+                    self.state = State.FORWARD
                     return
+                rqt = ItemRequest.Request()
+                rqt.robot_id = self.robot_id
+                try:
+                    future = self.offload_service.call_async(rqt)
+                    self.executor.spin_until_future_complete(future)
+                    response = future.result()
+                    if response.success:
+                        print('Item offloaded.')
+                        self.holding_item = False
+                        self.zones.data = []
+                        self.state = State.TURNING 
+                        self.turn_angle = 180
+                    else:
+                        print('Unable to offload item.' + response.message)
+                except Exception as e:
+                    print(e)
 
-                zone = self.zones.data[0]
-
-                estimated_distance = 32.4 * float(zone.size) ** -0.75
-
-                self.get_logger().info(f'Estimated distance {estimated_distance}')
-
-                if estimated_distance <= 32.4:
-                    rqt = ItemRequest.Request()
-                    rqt.robot_id = self.robot_id
-                    try:
-                        future = self.offload_service.call_async(rqt)
-                        self.executor.spin_until_future_complete(future)
-                        response = future.result()
-                        if response.success:
-                            print('Item offloaded.')
-                            self.holding_item = False
-                            self.zones.data = []
-                            self.state = State.TURNING 
-                            self.turn_angle = 180
-                        else:
-                            print('Unable to offload item.' + response.message)
-                    except Exception as e:
-                        print(e)
-
-                msg = Twist()
-                msg.linear.x = LINEAR_VELOCITY
-                msg.angular.z = zone.x / 320.0
-                self.cmd_vel_publisher.publish(msg)
+                
 
             case _:
                 pass

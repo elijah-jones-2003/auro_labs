@@ -346,7 +346,7 @@ def generate_launch_description():
     
     declare_wait_for_items_cmd = DeclareLaunchArgument(
         'wait_for_items',
-        default_value='False',
+        default_value='True',
         description='Whether to wait for every item to spawn before spawning any robots')
     
     gzserver_cmd = OpaqueFunction(function=gazebo_world)
