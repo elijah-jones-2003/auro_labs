@@ -41,9 +41,10 @@ SCAN_RIGHT = 3
 class State(Enum):
     FORWARD = 0
     TURNING = 1
-    COLLECTING = 2
-    DEPOSITING = 3
+    SET_GOAL = 2
     NAVIGATING = 4
+    COLLECTING = 4
+    DEPOSITING = 5   
 
 class RobotController(Node):
 
@@ -78,10 +79,6 @@ class RobotController(Node):
         self.declare_parameter('x', 0.0)
         self.declare_parameter('y', 0.0)
         self.declare_parameter('yaw', 0.0)
-
-        # self.initial_x = self.get_parameter('x').get_parameter_value().double_value
-        # self.initial_y = self.get_parameter('y').get_parameter_value().double_value
-        # self.initial_yaw = self.get_parameter('yaw').get_parameter_value().double_value
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
@@ -241,7 +238,58 @@ class RobotController(Node):
                     self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.goal_distance = random.uniform(1.0, 2.0)
                     self.state = State.FORWARD
-                    self.get_logger().info(f"Finished turning, driving forward by {self.goal_distance:.2f} metres")
+                    self.get_logger().info(f"Finished turning, driving forward by {self.goal_distance:.2f} metres")              
+
+            case State.SET_GOAL:
+                goal = None
+                if not self.holding_item:
+                    goal = self.items.data[0]
+                else:
+                    goal = self.zones.data[0]
+                    pass
+
+                goal_pose = PoseStamped()
+                goal_pose.header.frame_id = 'map'
+                goal_pose.header.stamp = self.get_clock().now().to_msg()
+                
+                goal_pose.pose.position.x = 0.0
+                goal_pose.pose.position.y = 2.0
+                goal_pose.pose.orientation.w = 1.0
+
+                self.navigator.goToPose(goal_pose)
+                self.state = State.NAVIGATING 
+
+            case State.NAVIGATING:
+                if not self.navigator.isTaskComplete():
+                    feedback = self.navigator.getFeedback()
+                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
+                else:
+
+                    result = self.navigator.getResult()
+                    print
+
+                    if result == TaskResult.SUCCEEDED:
+                        print('Goal succeeded!')
+                        if not self.holding_item:
+                            if len(self.items.data) > 0:
+                                self.state = State.COLLECTING
+                                return
+                        else:
+                            if len(self.zones.data) > 0:
+                                self.state = State.DEPOSITING
+                                return
+                    elif result == TaskResult.CANCELED:
+                        print('Goal was canceled!')
+                        self.previous_pose.pose = self.pose.pose
+                        self.previous_pose.header.stamp = self.get_clock().now().to_msg()
+                        self.state = State.FORWARD
+                    elif result == TaskResult.FAILED:
+                        print('Goal failed!')
+                        self.previous_pose.pose = self.pose.pose
+                        self.previous_pose.header.stamp = self.get_clock().now().to_msg()
+                        self.state = State.FORWARD
+                    else:
+                        print('Goal has an invalid return status!')
 
             case State.COLLECTING:
                 self.get_logger().info("Collecting state")  
@@ -280,42 +328,7 @@ class RobotController(Node):
                 #             self.get_logger().info('Unable to pick up item: ' + response.message)
                 #     except Exception as e:
                 #         self.get_logger().info('Exception ' + str(e))
-
-                goal_pose.header.frame_id = 'map'
-                goal_pose.header.stamp = self.get_clock().now().to_msg()
-
-                # msg = Twist()
-                # msg.linear.x = LINEAR_VELOCITY
-                # msg.angular.z = item.x / 320.0
-                # self.cmd_vel_publisher.publish(msg)
-                goal_pose.pose.position.x = 0.0
-                goal_pose.pose.position.y = 2.0
-                goal_pose.pose.orientation.w = 1.0
-
-                self.navigator.goToPose(goal_pose)
-                self.state = State.NAVIGATING
-
-
-            case State.NAVIGATING:
-
-                if not self.navigator.isTaskComplete():
-                    feedback = self.navigator.getFeedback()
-                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
-                else:
-
-                    result = self.navigator.getResult()
-                    print
-
-                    if result == TaskResult.SUCCEEDED:
-                        print('Goal succeeded!')
-                    elif result == TaskResult.CANCELED:
-                        print('Goal was canceled!')
-                    elif result == TaskResult.FAILED:
-                        print('Goal failed!')
-                    else:
-                        print('Goal has an invalid return status!')
             
-
             case State.DEPOSITING:
                 self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
