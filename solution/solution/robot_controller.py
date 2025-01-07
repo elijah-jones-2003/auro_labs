@@ -56,13 +56,15 @@ class RobotController(Node):
         self.pose = PoseStamped()
         self.pose.header.frame_id = 'map'
         self.pose.header.stamp = self.get_clock().now().to_msg()
-        self.yaw = self.pose.pose.orientation.z
-        self.x = self.pose.pose.position.x
-        self.y = self.pose.pose.position.y
+        # self.yaw = self.pose.pose.orientation.z
+        # self.x = self.pose.pose.position.x
+        # self.y = self.pose.pose.position.y
         self.navigator.setInitialPose(self.pose)
+        self.navigator.waitUntilNav2Active()
 
         self.previous_pose = PoseStamped() # Store a snapshot of the pose for comparison against future poses
-        self.previous_yaw = 0.0 # Snapshot of the angle for comparison against future angles
+        self.previous_pose.header.frame_id = 'map'
+
         self.turn_angle = 0.0 # Relative angle to turn to in the TURNING state
         self.turn_direction = TURN_LEFT # Direction to turn in the TURNING state
         self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
@@ -77,9 +79,9 @@ class RobotController(Node):
         self.declare_parameter('y', 0.0)
         self.declare_parameter('yaw', 0.0)
 
-        self.initial_x = self.get_parameter('x').get_parameter_value().double_value
-        self.initial_y = self.get_parameter('y').get_parameter_value().double_value
-        self.initial_yaw = self.get_parameter('yaw').get_parameter_value().double_value
+        # self.initial_x = self.get_parameter('x').get_parameter_value().double_value
+        # self.initial_y = self.get_parameter('y').get_parameter_value().double_value
+        # self.initial_yaw = self.get_parameter('yaw').get_parameter_value().double_value
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
@@ -116,6 +118,8 @@ class RobotController(Node):
             self.zone_callback, 
             10,
             callback_group=timer_callback_group)
+
+    # Callback functions
 
     def item_callback(self, msg):
         self.items = msg
@@ -164,7 +168,8 @@ class RobotController(Node):
         match self.state:
             case State.FORWARD:
                 if self.scan_triggered[SCAN_FRONT]:
-                    self.previous_yaw = self.yaw
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.TURNING
                     self.turn_angle = random.uniform(150, 170)
                     self.turn_direction = random.choice([TURN_LEFT, TURN_RIGHT])
@@ -172,7 +177,8 @@ class RobotController(Node):
                     return
 
                 if self.scan_triggered[SCAN_LEFT] or self.scan_triggered[SCAN_RIGHT]:
-                    self.previous_yaw = self.yaw
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.TURNING
                     self.turn_angle = 45
 
@@ -200,12 +206,13 @@ class RobotController(Node):
                 msg.linear.x = LINEAR_VELOCITY
                 self.cmd_vel_publisher.publish(msg)
 
-                difference_x = self.pose.pose.position.x - self.previous_pose.position.x
-                difference_y = self.pose.pose.position.y - self.previous_pose.position.y
+                difference_x = self.pose.pose.position.x - self.previous_pose.pose.position.x
+                difference_y = self.pose.pose.position.y - self.previous_pose.pose.position.y
                 distance_travelled = math.sqrt(difference_x ** 2 + difference_y ** 2)
 
                 if distance_travelled >= self.goal_distance:
-                    self.previous_yaw = self.yaw
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.TURNING
                     self.turn_angle = random.uniform(30, 150)
                     self.turn_direction = random.choice([TURN_LEFT, TURN_RIGHT])
@@ -227,10 +234,11 @@ class RobotController(Node):
                 msg.angular.z = self.turn_direction * ANGULAR_VELOCITY
                 self.cmd_vel_publisher.publish(msg)
 
-                yaw_difference = angles.normalize_angle(self.yaw - self.previous_yaw)
+                yaw_difference = angles.normalize_angle(self.pose.pose.orientation.w - self.previous_pose.pose.orientation.w)
 
                 if math.fabs(yaw_difference) >= math.radians(self.turn_angle):
-                    self.previous_pose = self.pose.pose
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.goal_distance = random.uniform(1.0, 2.0)
                     self.state = State.FORWARD
                     self.get_logger().info(f"Finished turning, driving forward by {self.goal_distance:.2f} metres")
@@ -238,7 +246,8 @@ class RobotController(Node):
             case State.COLLECTING:
                 self.get_logger().info("Collecting state")  
                 if len(self.items.data) == 0:
-                    self.previous_pose = self.pose.pose
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.FORWARD
                     return
 
@@ -310,7 +319,8 @@ class RobotController(Node):
             case State.DEPOSITING:
                 self.get_logger().info("Depositing state")  
                 if len(self.zones.data) == 0:
-                    self.previous_pose = self.pose.pose
+                    self.previous_pose.pose = self.pose.pose
+                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.TURNING
                     return
 
