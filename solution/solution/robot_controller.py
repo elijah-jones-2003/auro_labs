@@ -31,7 +31,7 @@ TURN_LEFT = 1 # Postive angular velocity turns left
 TURN_RIGHT = -1 # Negative angular velocity turns right
 
 SCAN_THRESHOLD = 0.5 # Metres per second
- # Array indexes for sensor sectors
+# Array indexes for sensor sectors
 SCAN_FRONT = 0
 SCAN_LEFT = 1
 SCAN_BACK = 2
@@ -42,7 +42,7 @@ class State(Enum):
     FORWARD = 0
     TURNING = 1
     SET_GOAL = 2
-    NAVIGATING = 4
+    NAVIGATING = 3
     COLLECTING = 4
     DEPOSITING = 5   
 
@@ -78,16 +78,16 @@ class RobotController(Node):
         self.zones = ZoneList()
         self.holding_item = False
 
-    # TODO Make robot_id work
-        self.declare_parameter('robot_id', 'robot1')
-        self.robot_id = self.get_parameter('robot_id').value
+        self.robot_id = self.get_namespace().strip('/')
+        self.initial_pose = self.get_name
 
-        self.declare_parameter('x', -3.5)
-        self.declare_parameter('y', 0.0)
-        self.declare_parameter('yaw', 0.0)
+        self.pose.pose.position.x = -3.5
+        self.pose.pose.position.y = 0.0
+        self.pose.pose.orientation.z = 0.0
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
+
 
         # Services
         client_callback_group = MutuallyExclusiveCallbackGroup()
@@ -95,10 +95,12 @@ class RobotController(Node):
 
         self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
         self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
-        
+
+
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
         self.cmd_vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
+
 
         # Subscribers
         self.robot_subscriber = self.create_subscription(
@@ -122,8 +124,8 @@ class RobotController(Node):
             10,
             callback_group=timer_callback_group)
 
-    # Callback functions
 
+    # Callback functions
     def item_callback(self, msg):
         self.items = msg
 
@@ -221,8 +223,6 @@ class RobotController(Node):
                     self.get_logger().info("Goal reached, turning " + ("left" if self.turn_direction == TURN_LEFT else "right") + f" by {self.turn_angle:.2f} degrees")
 
             case State.TURNING:
-                self.get_logger().info("Turning state")
-
                 if not self.holding_item:
                     if len(self.items.data) > 0:
                         self.state = State.COLLECTING
@@ -253,21 +253,24 @@ class RobotController(Node):
                         return
                     else:
                         goal = self.items.data[0]
+                        estimated_distance = 32.4 * float(goal.diameter) ** - 0.75
+                        
                 else:
                     if len(self.zones.data) == 0:
-                        self.state = State.FORWARD
+                        self.state = State.FORWARD 
                         return
                     else:
                         goal = self.zones.data[0]
+                        estimated_distance = (goal.size) * 11
                     pass
 
                 goal_pose = PoseStamped()
                 goal_pose.header.frame_id = 'map'
-                goal_pose.header.stamp = self.get_clock().now().to_msg()
+                goal_pose.header.stamp = self.get_clock().now().to_msg()                          
 
                 # Calculate the estimated distance and angle to the goal
-                estimated_distance = 32.4 * float(goal.diameter) ** - 0.75
                 estimated_angle = math.radians(self.pose.pose.orientation.z + math.atan2(goal.x, estimated_distance))
+                
                 print(f'Estimated distance: {estimated_distance}, angle: {estimated_angle}')
 
                 # Set the goal pose position
@@ -279,43 +282,38 @@ class RobotController(Node):
 
                 # Move to goal
                 self.navigator.goToPose(goal_pose)
-                self.state = State.NAVIGATING 
-
-            case State.NAVIGATING:
-                if not self.navigator.isTaskComplete():
-                    feedback = self.navigator.getFeedback()
-                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
-                else:
-                    result = self.navigator.getResult()
-                    if result == TaskResult.SUCCEEDED:
-                        print('Goal succeeded!')
-                        if not self.holding_item:   
-                            self.state = State.COLLECTING
-                            return
-                        else:
-                            if len(self.zones.data) > 0:
-                                self.state = State.DEPOSITING
-                                return
-                    elif result == TaskResult.CANCELED:
-                        print('Goal was canceled!')
-                        self.previous_pose.pose = self.pose.pose
-                        self.previous_pose.header.stamp = self.get_clock().now().to_msg()
-                        self.state = State.FORWARD
-                    elif result == TaskResult.FAILED:
-                        print('Goal failed!')
-                        self.previous_pose.pose = self.pose.pose
-                        self.previous_pose.header.stamp = self.get_clock().now().to_msg()
-                        self.state = State.FORWARD
-                    else:
-                        print('Goal has an invalid return status!')
+                self.state = State.COLLECTING 
 
             case State.COLLECTING:
-                self.get_logger().info("Collecting state") 
+                goal = None
                 if len(self.items.data) == 0:
-                    self.previous_pose.pose = self.pose.pose
-                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
                     self.state = State.FORWARD
-                    return 
+                    return
+                else:
+                    goal = self.items.data[0]
+                    
+                # Generate a goal pose to pass into the navigator
+                goal_pose = PoseStamped()
+                goal_pose.header.frame_id = 'map'
+                goal_pose.header.stamp = self.get_clock().now().to_msg()                          
+
+                # Calculate the estimated distance and angle to the goal
+                estimated_distance = 32.4 * float(goal.diameter) ** - 0.75
+                estimated_angle = math.radians(self.pose.pose.orientation.z + math.atan2(goal.x, estimated_distance))
+
+                # Set the goal pose position and orientation
+                goal_pose.pose.position.x = self.pose.pose.position.x + estimated_distance * math.cos(estimated_angle)
+                goal_pose.pose.position.y = self.pose.pose.position.y + estimated_distance * math.sin(estimated_angle)
+                goal_pose.pose.orientation.z = self.pose.pose.orientation.z
+
+                # Pass the goal to the navigator and wait till the robot gets there 
+                self.navigator.goToPose(goal_pose)
+
+                while not self.navigator.isTaskComplete():
+                    feedback = self.navigator.getFeedback()
+                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')    
+
+                # Pick up item
                 rqt = ItemRequest.Request()
                 rqt.robot_id = self.robot_id
                 try:
@@ -325,7 +323,7 @@ class RobotController(Node):
                     if response.success:
                         self.get_logger().info('Item picked up.')
                         self.holding_item = True
-                        self.state = State.SET_GOAL
+                        self.state = State.DEPOSITING
                         self.items.data = []
                     else:
                         self.get_logger().info('Unable to pick up item: ' + response.message)
@@ -334,12 +332,35 @@ class RobotController(Node):
                     self.get_logger().info('Exception ' + str(e))
             
             case State.DEPOSITING:
-                self.get_logger().info("Depositing state")  
-                if len(self.zones.data) == 0:
-                    self.previous_pose.pose = self.pose.pose
-                    self.previous_pose.header.stamp = self.get_clock().now().to_msg()
+                goal = None
+                if not self.holding_item:
                     self.state = State.FORWARD
                     return
+                elif len(self.zones.data) == 0:
+                    self.state = State.FORWARD
+                    return
+                else:
+                    goal = self.zones.data[0]
+                    
+                # Generate a goal pose to pass into the navigator
+                goal_pose = PoseStamped()
+                goal_pose.header.frame_id = 'map'
+                goal_pose.header.stamp = self.get_clock().now().to_msg()                          
+
+                # TODO calculate distance to zones 
+
+                # Set the goal pose position and orientation
+                goal_pose.pose.position.x = 2.5 #self.pose.pose.position.x + estimated_distance * math.cos(estimated_angle)
+                goal_pose.pose.position.y = 2.5 #self.pose.pose.position.y + estimated_distance * math.sin(estimated_angle)
+                goal_pose.pose.orientation.z = self.pose.pose.orientation.z
+
+                # Pass the goal to the navigator 
+                self.navigator.goToPose(goal_pose)
+                while not self.navigator.isTaskComplete():
+                    feedback = self.navigator.getFeedback()
+                    print('Estimated time of arrival: ' + '{0:.0f}'.format(Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9) + ' seconds.')
+
+                # Drop item
                 rqt = ItemRequest.Request()
                 rqt.robot_id = self.robot_id
                 try:
@@ -347,17 +368,16 @@ class RobotController(Node):
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
                     if response.success:
-                        print('Item offloaded.')
+                        self.get_logger().info('Item dropped.')
                         self.holding_item = False
-                        self.zones.data = []
-                        self.state = State.TURNING 
+                        self.state = State.TURNING
                         self.turn_angle = 180
+                        self.items.data = []
                     else:
-                        print('Unable to offload item.' + response.message)
+                        self.get_logger().info('Unable to drop item: ' + response.message)
+                        self.state = State.FORWARD
                 except Exception as e:
-                    print(e)
-
-                
+                    self.get_logger().info('Exception ' + str(e))   
 
             case _:
                 pass
