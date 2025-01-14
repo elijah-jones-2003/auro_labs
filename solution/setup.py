@@ -49,7 +49,7 @@ setup(
         'console_scripts': [
             'robot_controller = solution.robot_controller:main',
             'data_logger = solution.data_logger:main',
-            'nav2_commander = solution.nav2_commander:main'
+            'test_controller = solution.test_controller:main'
         ],
     },
 )

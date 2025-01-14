@@ -15,12 +15,12 @@ from auro_interfaces.srv import ItemRequest
 
 import math
 import random
-from geometry_msgs.msg import Twist, Pose, PoseStamped
+from geometry_msgs.msg import Twist, PoseStamped, Point
 from std_msgs.msg import String
 
 import angles
 from enum import Enum
-from tf_transformations import euler_from_quaternion
+from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from auro_interfaces.msg import StringWithPose
 
 
@@ -46,23 +46,31 @@ class State(Enum):
     COLLECTING = 4
     DEPOSITING = 5   
 
+# Zone locations
+ZONE_1 = Point(x = -3.5, y = 2.5)
+ZONE_2 = Point(x = -3.5, y = -2.5)
+ZONE_3 = Point(x = 2.5, y = -2.5)
+ZONE_4 = Point(x = 2.5, y = 2.5)
+
 class RobotController(Node):
 
     def __init__(self):
         super().__init__('robot_controller')
 
-        self.state = State.SET_GOAL
-        self.navigator = BasicNavigator()
-
+        # Get robot ID 
+        self.robot_id = self.get_namespace().strip('/')
+        # Create the initial pose
         self.pose = PoseStamped()
         self.pose.header.frame_id = 'map'
         self.pose.header.stamp = self.get_clock().now().to_msg()
-
-        # TODO: Set initial pose based on parameters
-
-        self.pose.pose.orientation.z = 0.0
+        # TODO: Set initial pose dynamically
         self.pose.pose.position.x = -3.5
         self.pose.pose.position.y = 0.0
+        self.pose.pose.orientation.z = 0.0 
+
+        self.state = State.FORWARD
+        self.navigator = BasicNavigator()
+        
         self.navigator.setInitialPose(self.pose)
         self.navigator.waitUntilNav2Active()
 
@@ -71,23 +79,15 @@ class RobotController(Node):
 
         self.turn_angle = 0.0 # Relative angle to turn to in the TURNING state
         self.turn_direction = TURN_LEFT # Direction to turn in the TURNING state
-        self.goal_distance = random.uniform(1.0, 2.0) # Goal distance to travel in FORWARD state
+        self.goal_distance = 0.0
         self.scan_triggered = [False] * 4 # Boolean value for each of the 4 LiDAR sensor sectors. True if obstacle detected within SCAN_THRESHOLD
         self.items = ItemList()
         self.robots = RobotList()
         self.zones = ZoneList()
         self.holding_item = False
 
-        self.robot_id = self.get_namespace().strip('/')
-        self.initial_pose = self.get_name
-
-        self.pose.pose.position.x = -3.5
-        self.pose.pose.position.y = 0.0
-        self.pose.pose.orientation.z = 0.0
-
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
-
 
         # Services
         client_callback_group = MutuallyExclusiveCallbackGroup()
@@ -123,7 +123,7 @@ class RobotController(Node):
             self.zone_callback, 
             10,
             callback_group=timer_callback_group)
-
+    
 
     # Callback functions
     def item_callback(self, msg):
@@ -165,6 +165,7 @@ class RobotController(Node):
     def control_loop(self):
         # Send message to rviz_text_marker node
         marker_input = StringWithPose()
+        print(str(self.state))
         marker_input.text = str(self.state)
         marker_input.pose = self.pose.pose 
         self.marker_publisher.publish(marker_input)
@@ -278,7 +279,7 @@ class RobotController(Node):
                 goal_pose.pose.position.y = self.pose.pose.position.y + estimated_distance * math.sin(estimated_angle)
 
                 # Set the goal pose orientation
-                goal_pose.pose.orientation.z = self.pose.pose.orientation.z
+                # goal_pose.pose.orientation.z = self.pose.pose.orientation.z
 
                 # Move to goal
                 self.navigator.goToPose(goal_pose)
@@ -345,14 +346,10 @@ class RobotController(Node):
                 # Generate a goal pose to pass into the navigator
                 goal_pose = PoseStamped()
                 goal_pose.header.frame_id = 'map'
-                goal_pose.header.stamp = self.get_clock().now().to_msg()                          
+                goal_pose.header.stamp = self.get_clock().now().to_msg()
+                goal_pose.pose.position = ZONE_4 
 
-                # TODO calculate distance to zones 
-
-                # Set the goal pose position and orientation
-                goal_pose.pose.position.x = 2.5 #self.pose.pose.position.x + estimated_distance * math.cos(estimated_angle)
-                goal_pose.pose.position.y = 2.5 #self.pose.pose.position.y + estimated_distance * math.sin(estimated_angle)
-                goal_pose.pose.orientation.z = self.pose.pose.orientation.z
+                # TODO calculate distance to zones dynamically
 
                 # Pass the goal to the navigator 
                 self.navigator.goToPose(goal_pose)
