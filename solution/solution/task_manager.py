@@ -2,10 +2,12 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 from geometry_msgs.msg import Point
-from assessment_interfaces.msg import Item, ItemList, ItemHolder, ItemHolders, ItemLog, Zone, ZoneList, Task, TaskList 
-from collections import defaultdict
-# from assessment_interfaces.msg import RobotList
+from assessment_interfaces.msg import Item, ItemList, ItemHolder, ItemHolders, ItemLog, Zone, ZoneList 
 from auro_interfaces.msg import StringWithPose
+from solution_interfaces.msg import TaskList, Task 
+from collections import defaultdict
+
+
 
 # Task Constants
 PICK_UP = 0
@@ -22,7 +24,7 @@ class TaskManager(Node):
         self.item_holders_subscriber = self.create_subscription(ItemHolders, '/item_holders', self.item_holders_callback, 10)
         self.robot_marker_subscriber = self.create_subscription(StringWithPose, '/robot_marker', self.robot_marker_callback, 10)
         self.items_subscriber = self.create_subscription(ItemList, '/items', self.items_callback, 10)
-        self.task_complete_subscriber = self.create_subscription(Task, '/task_complete', self.task_complete_callback, 10)
+        self.task_complete_subscriber = self.create_subscription(String, '/task_complete', self.task_complete_callback, 10)
 
         # Data storage
         self.robots_state_dict= {}  # {robot_id: status}
@@ -38,7 +40,13 @@ class TaskManager(Node):
 
     # Callback Functions
     def task_complete_callback(self, msg):
-        pass
+        print("Task done")
+        # task_complete = msg
+        # for task in self.task_list:
+        #     if task_complete.task_id == task.task_id:
+        #         self.task_list.data.remove(task)
+        #         self.get_logger().info(f"Task id {task.task_id} has been completed")
+        #         break
 
     def item_holders_callback(self, msg):
         self.item_holders = msg
@@ -60,49 +68,23 @@ class TaskManager(Node):
         task.destination = point
         task.action = action
         flag = False
-        for t in self.task_list.data:
+        for t in self.task_list.tasks:
             if task.destination == t.destination:
                 flag = True
                 break
         if not flag:
             self.task_ids[robot_id] += 1
-            print("Task added")
-            self.task_list.data.append(task)
+            self.get_logger().info(f"Task assigned to robot_id: {robot_id}, task id: {task.task_id}")
+            self.task_list.tasks.append(task)
 
     # Control Loop
     def control_loop(self):
-        self.get_logger().info("Task time")
+        self.assign_task("robot1", Point(x = -3.5, y = 2.5), PICK_UP)
         self.assign_task("robot1", Point(x = 2.5, y = 2.5), PICK_UP)
-        self.assign_task("robot2", Point(x = 2.5, y = -2.5), PICK_UP)
-        self.assign_task("robot3", Point(x = -3.5, y = -2.5), PICK_UP)
+        self.assign_task("robot1", Point(x = 2.5, y = -2.5), PICK_UP)
+        # self.assign_task("robot2", Point(x = 2.5, y = -2.5), PICK_UP)
+        # self.assign_task("robot3", Point(x = -3.5, y = -2.5), PICK_UP)
         self.task_list_publisher.publish(self.task_list)
-        # if task:
-        #     self.task_publisher.publish(task)
-        #     self.get_logger().info(f"Task assigned to robot {robot.robot_id}: {task}")
-        # # Prioritise depositing items in currently being held by robots
-        # for robot in self.item_holders:
-        #     if robot.holding_item:
-        #         if self.robots_state[robot.robot_id] ==  "State.IDLE":
-        #             task = Task()
-        #             task.robot_id = robot.robot_id
-        #             if robot.item_colour not in self.zones:
-        #                 # If the item colour doesn't exist, assign it to a zone
-        #                 self.zones[robot.item_colour] = robot.item_colour
-        #             # Now assign the destination based on the item colour
-        #             task.destination = self.zones[robot.item_colour]
-        #             task.action = DROP_OFF
-        #             self.task_publisher.publish(task)
-        #     else:
-        #         # If the robot is idle, assign a task
-        #         if self.robots_state[robot.robot_id] ==  "State.IDLE":
-        #             task = Task()
-        #             task.robot_id = 'robot1' #robot.robot_id
-        #             task.destination = Point(x = 2.5, y = 2.5)
-        #             task.action = PICK_UP
-        #             self.task_publisher.publish(task)
-        #             if task:
-        #                 self.task_publisher.publish(task)
-        #                 self.get_logger().info(f"Task assigned to robot {robot.robot_id}: {task}")
             
 
     

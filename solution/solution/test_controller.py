@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import ExternalShutdownException
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from assessment_interfaces.msg import RobotList, ItemList, ZoneList, Task, TaskList 
+from assessment_interfaces.msg import RobotList, ItemList, ZoneList
 
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from rclpy.duration import Duration
@@ -13,8 +13,12 @@ from rclpy.duration import Duration
 from auro_interfaces.msg import StringWithPose
 from auro_interfaces.srv import ItemRequest
 
+from solution_interfaces.msg import Task, TaskList
+from solution_interfaces.srv import TaskComplete
+
 import math
 import random
+import copy
 from geometry_msgs.msg import Twist, Point, PoseStamped
 from std_msgs.msg import String
 from nav_msgs.msg import Odometry
@@ -63,6 +67,7 @@ class RobotControllerNode(Node):
 
         self.state = State.IDLE
         self.current_task = None
+        self.last_task = Task()
         self.goal_pose = PoseStamped()
         self.goal_pose.header.frame_id = 'map'
 
@@ -83,21 +88,24 @@ class RobotControllerNode(Node):
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
-        self.task_complete_publisher = self.create_publisher(Task, 'task_complete', 10)
+        self.task_complete_publisher = self.create_publisher(Task, 'task_complete', 10) 
+        self.get_logger().info("Task complete publisher initialized.")  
 
         # Subscibers
         self.task_subscriber = self.create_subscription(TaskList, '/task_list', self.task_list_callback, 10, callback_group=timer_callback_group)
         # self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
         # self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, 10, callback_group=timer_callback_group)
+
+        self.navigator.waitUntilNav2Active()
         
         
     def task_list_callback(self, msg):
-        tasks = msg.data
+        tasks = msg.tasks
         self.current_task = tasks[0]
-        if len(msg.data) > 0:
+        if len(tasks) > 0:
             for task in tasks:
-                if task.robot_id == self.robot_id:
-                    print("I got a task")
+                if (task.robot_id == self.robot_id) and (self.state == State.IDLE):
+                    print("Task accepted")
                     self.current_task = task
                     break
         else:
@@ -109,6 +117,7 @@ class RobotControllerNode(Node):
         marker_input.text = str(self.state)
         marker_input.pose = self.pose.pose 
         self.marker_publisher.publish(marker_input)
+        self.task_complete_publisher.publish(self.last_task)
 
         match self.state:
             case State.IDLE:
@@ -149,6 +158,7 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item picked up.')
+                        print(self.current_task)
                         self.task_complete_publisher.publish(self.current_task)
                         self.current_task = None
                         self.state = State.IDLE
@@ -199,7 +209,13 @@ class RobotControllerNode(Node):
                         self.get_logger().info(f"Arrived at destination")
                         if not self.current_task == None: 
                             if self.current_task.action == PICK_UP:
-                                self.state = State.COLLECT_ITEM
+
+                                self.last_task = copy.deepcopy(self.current_task)
+                                self.task_complete_publisher.publish(self.current_task)
+
+                                self.current_task = None
+                                self.state = State.IDLE
+                                # self.state = State.COLLECT_ITEM
                             elif self.current_task.action == DROP_OFF:
                                 self.state = State.DEPOSIT_ITEM
                             else:
