@@ -41,10 +41,9 @@ DROP_OFF = 1
     
 class State(Enum):
     IDLE = 0
-    EXPLORING = 1
-    COLLECT_ITEM = 2
-    DEPOSIT_ITEM = 3
-    NAVIGATING = 4
+    COLLECT_ITEM = 1
+    DEPOSIT_ITEM = 2
+    NAVIGATING = 3
 
 
 class RobotControllerNode(Node):
@@ -52,7 +51,7 @@ class RobotControllerNode(Node):
         super().__init__('robot_controller')
         # Get robot ID 
         self.robot_id = self.get_namespace().strip('/')
-        self.get_logger.info("Robot ID:", self.robot_id)
+        self.get_logger().info("Robot ID:" + self.robot_id)
         # Create the initial pose
         self.pose = PoseStamped()
         self.pose.header.frame_id = 'map'
@@ -62,8 +61,8 @@ class RobotControllerNode(Node):
         self.pose.pose.position.y = 0.0
         self.pose.pose.orientation.z = 0.0 
 
-        self.state = State.EXPLORING
-        self.current_task = Task()
+        self.state = State.IDLE
+        self.current_task = None
         self.goal_pose = PoseStamped()
         self.goal_pose.header.frame_id = 'map'
         self.navigator = BasicNavigator()
@@ -85,16 +84,21 @@ class RobotControllerNode(Node):
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
 
         # Subscibers
-        self.task_subscriber = self.create_subscription(TaskList, 'task_list', self.task_callback, 10, callback_group=timer_callback_group)
+        self.task_subscriber = self.create_subscription(Task, '/task', self.task_callback, 10, callback_group=timer_callback_group)
+        # self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
+        # self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, 10, callback_group=timer_callback_group)
+        
         
     def task_callback(self, msg):
-        if len(msg.data) > 0:
-            for task in msg.data:
-                if task.robot_id == self.robot_id:
-                    self.current_task = task
-                    break
-        else:
-            self.current_task = None
+        print("Task received")
+        self.current_task = msg
+        # if len(msg.data) > 0:
+        #     for task in msg.data:
+        #         if task.robot_id == self.robot_id:
+        #             self.current_task = task
+        #             break
+        # else:
+        #     self.current_task = None
 
     def control_loop(self):
 
@@ -106,20 +110,26 @@ class RobotControllerNode(Node):
         match self.state:
             case State.IDLE:
                 # Check for valid task
-                if not self.current_task == None:
-                    self.goal_pose.pose.position = self.current_task.destination                  
+                if self.current_task != None:
+                    self.goal_pose.pose.position = self.current_task.destination 
+                    self.state = State.NAVIGATING                 
                 else:
                     self.get_logger().info("No task assigned. Exploring randomly.")
-                    self.state = State.EXPLORING
+                    self.goal_pose.header.stamp = self.get_clock().now().to_msg()
+                    # Create a random goal pose within the boundaries of the map
+                    self.goal_pose.pose.position.x = random.uniform(MIN_X, MAX_X)
+                    self.goal_pose.pose.position.y = random.uniform(MIN_Y, MAX_Y)
+                    self.get_logger().info(f"Random goal: {self.goal_pose.pose.position.x}, {self.goal_pose.pose.position.y}")
 
-            case State.EXPLORING:
-                self.goal_pose.header.stamp = self.get_clock().now().to_msg()
-                # Create a random goal pose within the boundaries of the map
-                self.goal_pose.pose.position.x = random.uniform(MIN_X, MAX_X)
-                self.goal_pose.pose.position.y = random.uniform(MIN_Y, MAX_Y)
+                    # Navigate to the goal position
+                    try:
+                        self.navigator.goToPose(self.goal_pose)
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to navigate to goal: {e}")
 
-                # Transition to navigation state
-                self.state = State.NAVIGATING
+                    while not self.navigator.isTaskComplete():
+                        if self.current_task != None:
+                            break
                 
             case State.COLLECT_ITEM:
                 # Pick up item
@@ -131,6 +141,7 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item picked up.')
+                        self.current_task = None
                         self.state = State.IDLE
                     else:
                         self.get_logger().info('Unable to pick up item: ' + response.message)
@@ -148,10 +159,8 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item dropped.')
-                        self.holding_item = False
+                        self.current_task = None
                         self.state = State.IDLE
-                        self.turn_angle = 180
-                        self.items.data = []
                     else:
                         self.get_logger().info('Unable to drop item: ' + response.message)
                         self.state = State.IDLE
@@ -166,26 +175,27 @@ class RobotControllerNode(Node):
                     self.get_logger().error(f"Failed to navigate to goal: {e}")
                     self.state = State.IDLE  # Return to idle if navigation fails
 
-                # Logger with a timer to reduce the amount of noise in the logs
-                rate = self.create_rate(2)
+                # Wait for the navigator to complete the task
                 while not self.navigator.isTaskComplete():
                     feedback = self.navigator.getFeedback()
                     if feedback:
                         eta = Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9
                         self.get_logger().info(f"Estimated time of arrival: {eta:.0f} seconds.")
-                    rate.sleep()
                 
                 # Once the navigator has finished, complete the task or catch failures
                 result = self.navigator.getResult()
                 match result:
                     case TaskResult.SUCCEEDED:
                         self.get_logger().info(f"Arrived at destination")
-                        if self.current_task.action == PICK_UP:
-                            self.state = State.COLLECT_ITEM
-                        elif self.current_task.action == DROP_OFF:
-                            self.state = State.DEPOSIT_ITEM
+                        if not self.current_task == None: 
+                            if self.current_task.action == PICK_UP:
+                                self.state = State.COLLECT_ITEM
+                            elif self.current_task.action == DROP_OFF:
+                                self.state = State.DEPOSIT_ITEM
+                            else:
+                                raise ValueError("Invalid task action. 0 for collecting and 1 for depositing")
                         else:
-                            raise ValueError("Invalid task action. 0 for collecting and 1 for depositing")
+                            self.state = State.IDLE
 
                     case TaskResult.CANCELED:
                         self.get_logger().info(f"Goal was canceled!")                       

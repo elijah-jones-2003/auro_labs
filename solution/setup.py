@@ -49,7 +49,8 @@ setup(
         'console_scripts': [
             'robot_controller = solution.robot_controller:main',
             'data_logger = solution.data_logger:main',
-            'test_controller = solution.test_controller:main'
+            'test_controller = solution.test_controller:main',
+            'task_manager = solution.task_manager:main'
         ],
     },
 )
