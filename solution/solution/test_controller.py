@@ -65,6 +65,7 @@ class RobotControllerNode(Node):
         self.current_task = None
         self.goal_pose = PoseStamped()
         self.goal_pose.header.frame_id = 'map'
+
         self.navigator = BasicNavigator()
         
         self.navigator.setInitialPose(self.pose)
@@ -82,23 +83,25 @@ class RobotControllerNode(Node):
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
+        self.task_complete_publisher = self.create_publisher(Task, 'task_complete', 10)
 
         # Subscibers
-        self.task_subscriber = self.create_subscription(Task, '/task', self.task_callback, 10, callback_group=timer_callback_group)
+        self.task_subscriber = self.create_subscription(TaskList, '/task_list', self.task_list_callback, 10, callback_group=timer_callback_group)
         # self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
         # self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, 10, callback_group=timer_callback_group)
         
         
-    def task_callback(self, msg):
-        print("Task received")
-        self.current_task = msg
-        # if len(msg.data) > 0:
-        #     for task in msg.data:
-        #         if task.robot_id == self.robot_id:
-        #             self.current_task = task
-        #             break
-        # else:
-        #     self.current_task = None
+    def task_list_callback(self, msg):
+        tasks = msg.data
+        self.current_task = tasks[0]
+        if len(msg.data) > 0:
+            for task in tasks:
+                if task.robot_id == self.robot_id:
+                    print("I got a task")
+                    self.current_task = task
+                    break
+        else:
+            self.current_task = None
 
     def control_loop(self):
 
@@ -128,8 +131,13 @@ class RobotControllerNode(Node):
                         self.get_logger().error(f"Failed to navigate to goal: {e}")
 
                     while not self.navigator.isTaskComplete():
+                        feedback = self.navigator.getFeedback()
                         if self.current_task != None:
-                            break
+                            self.get_logger().info("Task recieved, canceling exploration")
+                            self.navigator.cancelTask()
+                        if Duration.from_msg(feedback.navigation_time) > Duration(seconds = 30):
+                            self.get_logger().info("Navigation took too long... cancelling")
+                            self.navigator.cancelTask()
                 
             case State.COLLECT_ITEM:
                 # Pick up item
@@ -141,6 +149,7 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item picked up.')
+                        self.task_complete_publisher.publish(self.current_task)
                         self.current_task = None
                         self.state = State.IDLE
                     else:
@@ -159,6 +168,7 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item dropped.')
+                        self.task_complete_publisher.publish(self.current_task)
                         self.current_task = None
                         self.state = State.IDLE
                     else:

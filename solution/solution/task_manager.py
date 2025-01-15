@@ -3,6 +3,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from geometry_msgs.msg import Point
 from assessment_interfaces.msg import Item, ItemList, ItemHolder, ItemHolders, ItemLog, Zone, ZoneList, Task, TaskList 
+from collections import defaultdict
 # from assessment_interfaces.msg import RobotList
 from auro_interfaces.msg import StringWithPose
 
@@ -15,24 +16,30 @@ class TaskManager(Node):
         super().__init__('task_manager')
         
         # Publishers
-        self.task_publisher = self.create_publisher(Task, '/task', 10)
+        self.task_list_publisher = self.create_publisher(TaskList, '/task_list', 10)
         
         # Subscribers
         self.item_holders_subscriber = self.create_subscription(ItemHolders, '/item_holders', self.item_holders_callback, 10)
         self.robot_marker_subscriber = self.create_subscription(StringWithPose, '/robot_marker', self.robot_marker_callback, 10)
         self.items_subscriber = self.create_subscription(ItemList, '/items', self.items_callback, 10)
+        self.task_complete_subscriber = self.create_subscription(Task, '/task_complete', self.task_complete_callback, 10)
 
         # Data storage
         self.robots_state_dict= {}  # {robot_id: status}
         self.robots_pose_dict = {} # {robot_id: pose}
         self.items = []   # List of items with color and location
         self.zones = {}   # {assigned colour : zone_id}
-        self.item_holders = []  
-
+        self.item_holders = [] 
+        self.task_list = TaskList()
+        self.task_ids = self.task_ids = defaultdict(int)  # Keep track of current task_id robot association, task id = robot_id + incremented value eg 4th task for robot1 = 13
+        
         # Timer
         self.timer = self.create_timer(1, self.control_loop)
 
     # Callback Functions
+    def task_complete_callback(self, msg):
+        pass
+
     def item_holders_callback(self, msg):
         self.item_holders = msg
 
@@ -46,17 +53,29 @@ class TaskManager(Node):
     def items_callback(self, msg):
         self.items = msg.items 
 
-    def assign_task(self, robot_id):
+    def assign_task(self, robot_id, point, action):
         task = Task()
+        task.task_id = str(robot_id).lstrip('robot') + str(self.task_ids[robot_id])
+        task.robot_id = robot_id                          
+        task.destination = point
+        task.action = action
+        flag = False
+        for t in self.task_list.data:
+            if task.destination == t.destination:
+                flag = True
+                break
+        if not flag:
+            self.task_ids[robot_id] += 1
+            print("Task added")
+            self.task_list.data.append(task)
 
     # Control Loop
     def control_loop(self):
         self.get_logger().info("Task time")
-        task = Task()
-        task.robot_id = 'robot1' #robot.robot_id
-        task.destination = Point(x = 2.5, y = 2.5)
-        task.action = PICK_UP
-        self.task_publisher.publish(task)
+        self.assign_task("robot1", Point(x = 2.5, y = 2.5), PICK_UP)
+        self.assign_task("robot2", Point(x = 2.5, y = -2.5), PICK_UP)
+        self.assign_task("robot3", Point(x = -3.5, y = -2.5), PICK_UP)
+        self.task_list_publisher.publish(self.task_list)
         # if task:
         #     self.task_publisher.publish(task)
         #     self.get_logger().info(f"Task assigned to robot {robot.robot_id}: {task}")
