@@ -45,9 +45,10 @@ DROP_OFF = 1
     
 class State(Enum):
     IDLE = 0
-    COLLECT_ITEM = 1
-    DEPOSIT_ITEM = 2
+    PICK_UP_ITEM = 1
+    OFFLOAD_ITEM = 2
     NAVIGATING = 3
+    REPORT_TASK_COMPLETE = 4
 
 
 class RobotControllerNode(Node):
@@ -85,6 +86,7 @@ class RobotControllerNode(Node):
 
         self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
         self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
+        self.task_complete_service = self.create_client(TaskComplete, '/task_complete', callback_group=client_callback_group)
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
@@ -101,7 +103,6 @@ class RobotControllerNode(Node):
         
     def task_list_callback(self, msg):
         tasks = msg.tasks
-        self.current_task = tasks[0]
         if len(tasks) > 0:
             for task in tasks:
                 if (task.robot_id == self.robot_id) and (self.state == State.IDLE):
@@ -111,13 +112,25 @@ class RobotControllerNode(Node):
         else:
             self.current_task = None
 
-    def control_loop(self):
+    def notify_task_complete(self, task_id):
+        request = TaskComplete.Request()
+        request.task_id = task_id
+        request.robot_id = self.robot_id
 
+        future = self.task_complete_service.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+
+        if future.result().success:
+            self.get_logger().info(f"Successfully marked task {task_id} as complete.")
+        else:
+            self.get_logger().warn(f"Failed to mark task {task_id} as complete: {future.result().message}")
+        return 
+
+    def control_loop(self):
         marker_input = StringWithPose()
         marker_input.text = str(self.state)
         marker_input.pose = self.pose.pose 
         self.marker_publisher.publish(marker_input)
-        self.task_complete_publisher.publish(self.last_task)
 
         match self.state:
             case State.IDLE:
@@ -148,7 +161,7 @@ class RobotControllerNode(Node):
                             self.get_logger().info("Navigation took too long... cancelling")
                             self.navigator.cancelTask()
                 
-            case State.COLLECT_ITEM:
+            case State.PICK_UP_ITEM:
                 # Pick up item
                 rqt = ItemRequest.Request()
                 rqt.robot_id = self.robot_id
@@ -158,17 +171,14 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item picked up.')
-                        print(self.current_task)
-                        self.task_complete_publisher.publish(self.current_task)
-                        self.current_task = None
-                        self.state = State.IDLE
+                        self.state = State.REPORT_TASK_COMPLETE
                     else:
                         self.get_logger().info('Unable to pick up item: ' + response.message)
                         self.state = State.IDLE
                 except Exception as e:
                     self.get_logger().info('Exception ' + str(e))
 
-            case State.DEPOSIT_ITEM:
+            case State.OFFLOAD_ITEM:
                 # Drop item
                 rqt = ItemRequest.Request()
                 rqt.robot_id = self.robot_id
@@ -178,9 +188,7 @@ class RobotControllerNode(Node):
                     response = future.result()
                     if response.success:
                         self.get_logger().info('Item dropped.')
-                        self.task_complete_publisher.publish(self.current_task)
-                        self.current_task = None
-                        self.state = State.IDLE
+                        self.state = State.REPORT_TASK_COMPLETE
                     else:
                         self.get_logger().info('Unable to drop item: ' + response.message)
                         self.state = State.IDLE
@@ -209,17 +217,11 @@ class RobotControllerNode(Node):
                         self.get_logger().info(f"Arrived at destination")
                         if not self.current_task == None: 
                             if self.current_task.action == PICK_UP:
-
-                                self.last_task = copy.deepcopy(self.current_task)
-                                self.task_complete_publisher.publish(self.current_task)
-
-                                self.current_task = None
-                                self.state = State.IDLE
-                                # self.state = State.COLLECT_ITEM
+                                self.state = State.PICK_UP_ITEM
                             elif self.current_task.action == DROP_OFF:
-                                self.state = State.DEPOSIT_ITEM
+                                self.state = State.OFFLOAD_ITEM
                             else:
-                                raise ValueError("Invalid task action. 0 for collecting and 1 for depositing")
+                                raise ValueError("Invalid task action. 0 for pick up and 1 for offload.")
                         else:
                             self.state = State.IDLE
 
@@ -235,6 +237,22 @@ class RobotControllerNode(Node):
                         self.get_logger().info(f"Goal has an invalid return status!")
                         self.state = State.IDLE
 
+            case State.REPORT_TASK_COMPLETE:
+                rqt = TaskComplete.Request()
+                rqt.robot_id = self.robot_id
+                rqt.task_id = self.current_task.task_id
+                try:
+                    future = self.task_complete_service.call_async(rqt)
+                    self.executor.spin_until_future_complete(future)
+                    response = future.result()
+                    if response.success:
+                        self.current_task = None
+                        self.state = State.IDLE
+                    else:
+                        self.get_logger().warn(f"Failed to mark task {rqt.task_id} as complete: {future.result().message}")
+                        self.state = State.IDLE
+                except Exception as e:
+                    self.get_logger().info('Exception ' + str(e))
 
 
     def destroy_node(self):

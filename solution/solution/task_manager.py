@@ -4,7 +4,8 @@ from std_msgs.msg import String
 from geometry_msgs.msg import Point
 from assessment_interfaces.msg import Item, ItemList, ItemHolder, ItemHolders, ItemLog, Zone, ZoneList 
 from auro_interfaces.msg import StringWithPose
-from solution_interfaces.msg import TaskList, Task 
+from solution_interfaces.msg import TaskList, Task
+from solution_interfaces.srv import TaskComplete 
 from collections import defaultdict
 
 
@@ -16,6 +17,9 @@ DROP_OFF = 1
 class TaskManager(Node):
     def __init__(self):
         super().__init__('task_manager')
+
+        # Services
+        self.task_complete_service = self.create_service(TaskComplete, '/task_complete', self.task_complete_callback)
         
         # Publishers
         self.task_list_publisher = self.create_publisher(TaskList, '/task_list', 10)
@@ -24,7 +28,6 @@ class TaskManager(Node):
         self.item_holders_subscriber = self.create_subscription(ItemHolders, '/item_holders', self.item_holders_callback, 10)
         self.robot_marker_subscriber = self.create_subscription(StringWithPose, '/robot_marker', self.robot_marker_callback, 10)
         self.items_subscriber = self.create_subscription(ItemList, '/items', self.items_callback, 10)
-        self.task_complete_subscriber = self.create_subscription(String, '/task_complete', self.task_complete_callback, 10)
 
         # Data storage
         self.robots_state_dict= {}  # {robot_id: status}
@@ -37,16 +40,31 @@ class TaskManager(Node):
         
         # Timer
         self.timer = self.create_timer(1, self.control_loop)
+        # self.assign_task("robot1", Point(x = 1.0, y = 2.0), PICK_UP)
+        # self.assign_task("robot1", Point(x = 2.5, y = 2.5), DROP_OFF)
+        # self.assign_task("robot2", Point(x = -1.0, y = 0.0), PICK_UP)
+        # self.assign_task("robot2", Point(x = -3.5, y = -2.5), DROP_OFF)
+        # self.assign_task("robot3", Point(x = 1.0, y = 0.0), PICK_UP)
+        # self.assign_task("robot3", Point(x = 2.5, y = -2.5), DROP_OFF)
 
     # Callback Functions
-    def task_complete_callback(self, msg):
-        print("Task done")
-        # task_complete = msg
-        # for task in self.task_list:
-        #     if task_complete.task_id == task.task_id:
-        #         self.task_list.data.remove(task)
-        #         self.get_logger().info(f"Task id {task.task_id} has been completed")
-        #         break
+    def task_complete_callback(self, request, response):
+    # Extract task_id from the request
+        task_id = request.task_id
+        # Find and remove the task from the task list
+        for task in self.task_list.tasks:
+            if task.task_id == task_id:
+                self.task_list.tasks.remove(task)
+                self.get_logger().info(f"{request.robot_id} has completed task {task_id}.")
+                response.success = True
+                response.message = f"Task {task_id} has been marked as complete."
+                return response
+
+        # If task not found, return a failure response
+        self.get_logger().warn(f"Task {task_id} not found in the list.")
+        response.success = False
+        response.message = f"Task {task_id} does not exist."
+        return response
 
     def item_holders_callback(self, msg):
         self.item_holders = msg
@@ -79,14 +97,10 @@ class TaskManager(Node):
 
     # Control Loop
     def control_loop(self):
-        self.assign_task("robot1", Point(x = -3.5, y = 2.5), PICK_UP)
-        self.assign_task("robot1", Point(x = 2.5, y = 2.5), PICK_UP)
-        self.assign_task("robot1", Point(x = 2.5, y = -2.5), PICK_UP)
+        
         # self.assign_task("robot2", Point(x = 2.5, y = -2.5), PICK_UP)
         # self.assign_task("robot3", Point(x = -3.5, y = -2.5), PICK_UP)
         self.task_list_publisher.publish(self.task_list)
-            
-
     
     def destroy_node(self):
         super().destroy_node()
