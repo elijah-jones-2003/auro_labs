@@ -10,7 +10,7 @@ from geometry_msgs.msg import Point
 from assessment_interfaces.msg import Item, ItemList, ItemHolder, ItemHolders, Zone, ZoneList 
 from auro_interfaces.msg import StringWithPose
 from solution_interfaces.msg import TaskList, Task
-from solution_interfaces.srv import TaskComplete, GetInitialPose
+from solution_interfaces.srv import TaskComplete
 
 # Misc
 from collections import defaultdict

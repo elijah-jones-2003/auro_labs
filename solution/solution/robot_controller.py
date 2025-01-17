@@ -14,7 +14,7 @@ from assessment_interfaces.msg import RobotList, ItemList, ZoneList
 from auro_interfaces.msg import StringWithPose
 from auro_interfaces.srv import ItemRequest
 from solution_interfaces.msg import Task, TaskList
-from solution_interfaces.srv import TaskComplete, GetInitialPose
+from solution_interfaces.srv import TaskComplete
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist, Point, PoseStamped
 
@@ -99,7 +99,6 @@ class RobotControllerNode(Node):
         self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
         self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
         self.task_complete_service = self.create_client(TaskComplete, '/task_complete', callback_group=client_callback_group)
-        self.initial_pose_client = self.create_client(GetInitialPose, 'get_initial_pose')
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
