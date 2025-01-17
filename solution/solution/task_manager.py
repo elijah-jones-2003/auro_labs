@@ -29,8 +29,8 @@ ZONE_4 = Point(x = 2.5, y = 2.5)
 
 
 # Cluster Constants
-RED_CLUSTER = Point(x = -1.0, y= -2.0)
-GREEN_CLUSTER = Point(x = 1.0, y= -2.0)
+RED_CLUSTER = Point(x = -1.0, y = -2.0)
+GREEN_CLUSTER = Point(x = 1.0, y = -2.0)
 BLUE_CLUSTER = Point(x = 1.0, y = 2.0)
 
 class TaskManager(Node):
@@ -143,7 +143,7 @@ class TaskManager(Node):
                         self.assign_task(robot.robot_id, BLUE_CLUSTER, PICK_UP)
                     case "robot2":
                         self.assign_task(robot.robot_id, RED_CLUSTER, PICK_UP)   
-                    case "robot1":
+                    case "robot3":
                         self.assign_task(robot.robot_id, GREEN_CLUSTER, PICK_UP)
                 
     
