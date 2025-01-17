@@ -56,7 +56,13 @@ class State(Enum):
     OBSTACLE_AVOIDANCE = 5
 
 class RobotControllerNode(Node):
+    """
+    A ROS2 Node for controlling a robot in a multi-robot environment, based on tasks delegated by the task manager 
+    """
     def __init__(self):
+        """
+        Initializes the RobotControllerNode
+        """
         super().__init__('robot_controller')
         # Get robot ID 
         self.robot_id = self.get_namespace().strip('/')
@@ -111,6 +117,12 @@ class RobotControllerNode(Node):
         self.robots_subscriber = self.create_subscription(RobotList, '/robots', self.robots_callback, 10, callback_group=timer_callback_group)
                
     def task_list_callback(self, msg):
+        """
+        Callback for the /task_list topic. Assigns tasks to the robot when available.
+
+        Args:
+            msg (TaskList): message containing the list of tasks produced by the task manager
+        """
         # Get tasks from data
         tasks = msg.tasks
         if len(tasks) > 0:
@@ -124,6 +136,12 @@ class RobotControllerNode(Node):
             self.current_task = None
 
     def notify_task_complete(self, task_id):
+        """
+        Calls the TaskComplete service to inform the task manager that the current task is complete.
+
+        Args:
+            task_id (str): The id of the task to be removed
+        """
         # Create request
         request = TaskComplete.Request()
         request.task_id = task_id
@@ -140,6 +158,7 @@ class RobotControllerNode(Node):
         return 
 
     def odom_callback(self, msg):
+
         self.pose.pose = msg.pose.pose
 
         # Generate yaw from the orientation
@@ -214,7 +233,7 @@ class RobotControllerNode(Node):
                 
             # Once the robot has reached its destination, enter this state to pick up item
             case State.PICK_UP_ITEM:
-                
+
                 # Generate item request
                 request = ItemRequest.Request()
                 request.robot_id = self.robot_id

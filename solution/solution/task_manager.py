@@ -34,7 +34,13 @@ GREEN_CLUSTER = Point(x = 1.0, y = -2.0)
 BLUE_CLUSTER = Point(x = 1.0, y = 2.0)
 
 class TaskManager(Node):
+    """
+    TaskManager is responsible for managing tasks and coordinating the activities of multiple robots.
+    """
     def __init__(self):
+        """
+        Initializes the TaskManager node, setting up services, publishers, subscribers, and internal data structures.
+        """
         super().__init__('task_manager')
 
         # Services
@@ -66,6 +72,16 @@ class TaskManager(Node):
     # Callback Functions
 
     def task_complete_callback(self, request, response):
+        """
+        Callback for the '/task_complete' service to handle task completion.
+
+        Args:
+            request (TaskComplete.Request): Contains the task_id and robot_id.
+            response (TaskComplete.Response): Populated with success or failure details.
+
+        Returns:
+            TaskComplete.Response: Indicates whether the task was successfully marked as complete.
+        """
     # Extract task_id from the request
         task_id = request.task_id
         # Find and remove the task from the task list
@@ -84,19 +100,43 @@ class TaskManager(Node):
         return response
 
     def item_holders_callback(self, msg):
+        """
+        Callback for the '/item_holders' topic to update the list of robots holding items.
+
+        Args:
+            msg (ItemHolders): Message containing list of robots and information about the item they are carrying
+        """
         self.item_holders = msg.data
 
     # Get the state and pose of all robots
-    def robot_marker_callback(self, msg):  
+    def robot_marker_callback(self, msg): 
+        """
+        Callback for the '/robot_marker' topic to update robot states and poses.
+
+        Args:
+            msg (StringWithPose): Contains pose, and status text.
+        """ 
         robot_id = msg.header.frame_id
         self.robots_pose_dict[robot_id] = msg.pose
         self.robots_state_dict[robot_id] = msg.text
 
     def items_callback(self, msg):
+        """
+        WARNING : Does not work
+        Callback for robot-specific '/robotX/items' topics to collate visible items.        
+        """
         # TODO collate each robots list of items making sure not to collect the same item twice (actually might not matter)
         self.items = msg.data 
 
     def assign_task(self, robot_id, point, action):
+        """
+        Assigns a new task to a robot, ensuring there are no duplicate tasks or conflicts.
+
+        Args:
+            robot_id (string): The ID of the robot to which the task is assigned.
+            point (Point): The destination of the task.
+            action (int): The action to perform (e.g., PICK_UP or DROP_OFF).
+        """
         task = Task()
         task.task_id = str(robot_id).lstrip('robot') + str(self.task_ids[robot_id])
         task.robot_id = robot_id                          
@@ -148,6 +188,9 @@ class TaskManager(Node):
                 
     
     def destroy_node(self):
+        """
+        Clean up the node at shutdown
+        """
         super().destroy_node()
     
 
