@@ -93,6 +93,7 @@ def generate_launch_description():
 
     rviz_config = PathJoinSubstitution([FindPackageShare('assessment'), 'rviz', 'namespaced_nav2.rviz'])
     rviz_windows = PathJoinSubstitution([FindPackageShare('assessment'), 'config', 'rviz_windows.yaml'])
+
     # rviz_windows = PathJoinSubstitution([FindPackageShare(package_name), 'config', 'custom_rviz_windows.yaml'])
     map = PathJoinSubstitution([FindPackageShare('assessment'), 'maps', 'assessment_world.yaml'])
     params = PathJoinSubstitution([FindPackageShare('assessment'), 'params', 'nav2_params_namespaced.yaml'])
@@ -116,17 +117,23 @@ def generate_launch_description():
                           'obstacles': 'true',
                           'item_manager': 'true',
                           'random_seed': random_seed,
-                          'use_nav2': 'True',
+                          'use_nav2': 'true',
                           'map': map,
                           'params_file': params,
                           'headless': 'false',
                           'limit_real_time_factor': 'true',
-                          'wait_for_items': 'false',
+                          'wait_for_items': 'true',
                           # 'extra_gazebo_args': '--verbose',
                           }.items()
     )
 
     robot_controller_cmd = OpaqueFunction(function=robot_controller_actions)
+
+    task_manager_cmd = Node(
+        package='solution',
+        executable='task_manager',
+        output='screen'
+    )
 
     data_logger_cmd = Node(
         package='solution',
@@ -157,5 +164,6 @@ def generate_launch_description():
     ld.add_action(robot_controller_cmd)
     ld.add_action(data_logger_cmd)
     ld.add_action(timeout_cmd)
+    ld.add_action(task_manager_cmd)
 
     return ld

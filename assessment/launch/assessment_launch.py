@@ -331,7 +331,7 @@ def generate_launch_description():
     
     declare_use_nav2_cmd = DeclareLaunchArgument(
         'use_nav2',
-        default_value='True',
+        default_value='true',
         description='Whether to use the navigation stack (Nav2)')
     
     declare_headless_cmd = DeclareLaunchArgument(

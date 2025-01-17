@@ -140,10 +140,10 @@ class RobotControllerNode(Node):
     def odom_callback(self, msg):
         self.pose.pose = msg.pose.pose
 
-        (roll, pitch, yaw) = euler_from_quaternion([self.pose.orientation.x,
-                                                    self.pose.orientation.y,
-                                                    self.pose.orientation.z,
-                                                    self.pose.orientation.w])
+        (roll, pitch, yaw) = euler_from_quaternion([self.pose.pose.orientation.x,
+                                                    self.pose.pose.orientation.y,
+                                                    self.pose.pose.orientation.z,
+                                                    self.pose.pose.orientation.w])
         
         self.yaw = yaw
 
