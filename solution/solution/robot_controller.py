@@ -66,7 +66,7 @@ class RobotControllerNode(Node):
         self.pose.header.frame_id = 'map'
         self.pose.header.stamp = self.get_clock().now().to_msg()
         
-        # Set initial pose dynamically
+        # Get initial pose
         self.declare_parameter('x', 0.0)
         self.declare_parameter('y', 0.0)
         self.declare_parameter('yaw', 0.0)
@@ -77,10 +77,10 @@ class RobotControllerNode(Node):
 
         self.state = State.IDLE
         self.current_task = None
-        self.last_task = Task()
         self.goal_pose = PoseStamped()
         self.goal_pose.header.frame_id = 'map'
 
+        # Initialise a nav2 BasicNavigator
         self.navigator = BasicNavigator()
         self.navigator.setInitialPose(self.pose)
         self.navigator.waitUntilNav2Active()
@@ -102,32 +102,34 @@ class RobotControllerNode(Node):
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
-        self.task_complete_publisher = self.create_publisher(Task, 'task_complete', 10) 
-        self.get_logger().info("Task complete publisher initialized.")  
+        self.task_complete_publisher = self.create_publisher(Task, 'task_complete', 10)   
 
         # Subscibers
         self.task_subscriber = self.create_subscription(TaskList, '/task_list', self.task_list_callback, 10, callback_group=timer_callback_group)
         self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
         self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, QoSPresetProfiles.SENSOR_DATA.value, callback_group=timer_callback_group)
         self.robots_subscriber = self.create_subscription(RobotList, '/robots', self.robots_callback, 10, callback_group=timer_callback_group)
-        
-        
+               
     def task_list_callback(self, msg):
+        # Get tasks from data
         tasks = msg.tasks
         if len(tasks) > 0:
             for task in tasks:
+                # If a task has this robots id attached and the robot is idle, accept task
                 if (task.robot_id == self.robot_id) and (self.state == State.IDLE):
-                    print("Task accepted")
+                    self.get_logger().info(f"Task: {task.task_id} accepted")
                     self.current_task = task
                     break
         else:
             self.current_task = None
 
     def notify_task_complete(self, task_id):
+        # Create request
         request = TaskComplete.Request()
         request.task_id = task_id
         request.robot_id = self.robot_id
 
+        # Create a future object and spin until the service has been completed
         future = self.task_complete_service.call_async(request)
         rclpy.spin_until_future_complete(self, future)
 
@@ -140,11 +142,11 @@ class RobotControllerNode(Node):
     def odom_callback(self, msg):
         self.pose.pose = msg.pose.pose
 
+        # Generate yaw from the orientation
         (roll, pitch, yaw) = euler_from_quaternion([self.pose.pose.orientation.x,
                                                     self.pose.pose.orientation.y,
                                                     self.pose.pose.orientation.z,
                                                     self.pose.pose.orientation.w])
-        
         self.yaw = yaw
 
     def scan_callback(self, msg):
@@ -160,22 +162,25 @@ class RobotControllerNode(Node):
 
     def robots_callback(self, msg):
         for robot in msg.data:
-            if robot.size >= 0.4:
+            # Trial and error 0.4-0.5 is too close, potential for the robots to get stuck
+            if robot.size >= 0.45:
                 self.robot_in_way = True 
         else:
             self.robot_in_way = False
 
     def control_loop(self):
-        
+        # Publish marker for Rviz and task manager
         marker_input = StringWithPose()
         marker_input.text = str(self.state)
         marker_input.pose = self.pose.pose 
         self.marker_publisher.publish(marker_input)
 
         match self.state:
+            # Base state, has its own navigation so that it is interruptable 
             case State.IDLE:
                 # Check for valid task
                 if self.current_task != None:
+                    # If there is a valid task, add the destination to the goal pose and change to the navigating state
                     self.goal_pose.pose.position = self.current_task.destination 
                     self.state = State.NAVIGATING                 
                 else:
@@ -193,49 +198,57 @@ class RobotControllerNode(Node):
                         self.get_logger().error(f"Failed to navigate to goal: {e}")
 
                     while not self.navigator.isTaskComplete():
+                        # Obstacle detection in case of a nav2 malfunction
                         if True in self.scan_triggered:
                             self.state = State.OBSTACLE_AVOIDANCE
-                            self.current_task = None
                             return
                         feedback = self.navigator.getFeedback()
+                        # Allow for interruption if a task is found
                         if self.current_task != None:
                             self.get_logger().info("Task recieved, canceling exploration")
                             self.navigator.cancelTask()
+                        # Dont let the robot get stuck navigating if the goal isnt achievable 
                         if Duration.from_msg(feedback.navigation_time) > Duration(seconds = 30):
                             self.get_logger().info("Navigation took too long... cancelling")
                             self.navigator.cancelTask()
                 
+            # Once the robot has reached its destination, enter this state to pick up item
             case State.PICK_UP_ITEM:
-                # Pick up item
+                
+                # Generate item request
                 request = ItemRequest.Request()
                 request.robot_id = self.robot_id
                 try:
+                    # Call pick up service and spin untill complete
                     future = self.pick_up_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
+                    # If the item is successfully deposited report task as being complete so task manager can assign a new task
                     if response.success:
                         self.get_logger().info('Item picked up.')
-                        self.state = State.REPORT_TASK_COMPLETE
                     else:
+                        # If the service fails, report task as complete anyway to remove task from task list. This assumes that something is wrong with that task rather than the service
                         self.get_logger().info('Unable to pick up item: ' + response.message)
-                        self.state = State.IDLE
+                    self.state = State.REPORT_TASK_COMPLETE
                 except Exception as e:
                     self.get_logger().info('Exception ' + str(e))
 
             case State.OFFLOAD_ITEM:
-                # Drop item
+                # Generate item request
                 request = ItemRequest.Request()
                 request.robot_id = self.robot_id
                 try:
+                    # Call offload service and spin untill its complete
                     future = self.offload_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
+                    # If the item is offloaded successfully report task complete so task manager can assign new task
                     if response.success:
                         self.get_logger().info('Item dropped.')
-                        self.state = State.REPORT_TASK_COMPLETE
                     else:
+                        # If the service fails again still remove task as it may be a faulty message
                         self.get_logger().info('Unable to drop item: ' + response.message)
-                        self.state = State.IDLE
+                    self.state = State.REPORT_TASK_COMPLETE
                 except Exception as e:
                     self.get_logger().info('Exception ' + str(e))
 
@@ -277,6 +290,7 @@ class RobotControllerNode(Node):
                         else:
                             self.state = State.IDLE
 
+                    # Report any cancellations, failures or anything else
                     case TaskResult.CANCELED:
                         self.get_logger().info(f"Goal was canceled!")                       
                         self.state = State.IDLE
@@ -290,18 +304,23 @@ class RobotControllerNode(Node):
                         self.state = State.IDLE
 
             case State.REPORT_TASK_COMPLETE:
+                # Create task complete request
                 request = TaskComplete.Request()
                 request.robot_id = self.robot_id
                 request.task_id = self.current_task.task_id
                 try:
+                    # Call task complete service and wait till complete
                     future = self.task_complete_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
                     if response.success:
+                        # If the task is removed successfully get rid of curent task and go idle
                         self.current_task = None
                         self.state = State.IDLE
                     else:
+                        # If task cannot be removed from task list, clear it from current_task and move on, but warn that it couldnt be destroyed
                         self.get_logger().warn(f"Failed to mark task {request.task_id} as complete: {future.result().message}")
+                        self.current_task = None
                         self.state = State.IDLE
                 except Exception as e:
                     self.get_logger().info('Exception ' + str(e))
@@ -314,7 +333,7 @@ class RobotControllerNode(Node):
                 self.navigator.setInitialPose(self.pose)
                 if self.robot_in_way:
                     # Calculate a new goal behind the robot
-                    backup_distance = 0.2  # Distance to back up
+                    backup_distance = 0.3  # Distance to back up
                     backup_pose = PoseStamped()
                     backup_pose.header.frame_id = 'map'
                     backup_pose.header.stamp = self.get_clock().now().to_msg()
@@ -335,6 +354,7 @@ class RobotControllerNode(Node):
                         if feedback:
                             self.get_logger().info("Backing up...")
 
+                    # Back out of range of each other and wait a random amount of time for the other robot to move off
                     result = self.navigator.getResult()
                     if result == TaskResult.SUCCEEDED:
                         self.get_logger().info("Successfully backed up.")

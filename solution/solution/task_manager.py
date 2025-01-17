@@ -27,6 +27,12 @@ ZONE_2 = Point(x = -3.5, y = -2.5)
 ZONE_3 = Point(x = 2.5, y = -2.5)
 ZONE_4 = Point(x = 2.5, y = 2.5)
 
+
+# Cluster Constants
+RED_CLUSTER = Point(x = -1.0, y= -2.0)
+GREEN_CLUSTER = Point(x = 1.0, y= -2.0)
+BLUE_CLUSTER = Point(x = 1.0, y = 2.0)
+
 class TaskManager(Node):
     def __init__(self):
         super().__init__('task_manager')
@@ -40,7 +46,9 @@ class TaskManager(Node):
         # Subscribers
         self.item_holders_subscriber = self.create_subscription(ItemHolders, '/item_holders', self.item_holders_callback, 10)
         self.robot_marker_subscriber = self.create_subscription(StringWithPose, '/robot_marker', self.robot_marker_callback, 10)
-        self.items_subscriber = self.create_subscription(ItemList, '/items', self.items_callback, 10)
+        self.items_subscriber_robot1 = self.create_subscription(ItemList, 'robot1/items', self.items_callback, 10)
+        self.items_subscriber_robot2 = self.create_subscription(ItemList, 'robot2/items', self.items_callback, 10)
+        self.items_subscriber_robot3 = self.create_subscription(ItemList, 'robot3/items', self.items_callback, 10)
 
         # Data storage
         self.robots_state_dict= {}  # {robot_id: status}
@@ -85,8 +93,8 @@ class TaskManager(Node):
         self.robots_state_dict[robot_id] = msg.text
 
     def items_callback(self, msg):
-        # Todo collate each robots list of items making sure not to collect the same item twice (actually might not matter)
-        self.items = msg.items 
+        # TODO collate each robots list of items making sure not to collect the same item twice (actually might not matter)
+        self.items = msg.data 
 
     def assign_task(self, robot_id, point, action):
         task = Task()
@@ -120,18 +128,24 @@ class TaskManager(Node):
 
         # Generate tasks for the robots 
         for robot in self.item_holders:
-            # If we know the robot is holding an item, assign it a drop off task to the zone associated with the colour of that item
+            # TODO proper zone finding
             if robot.holding_item:
-                # If that colour item has not been assigned a zone, assign it to a zone
-                if not robot.holding_item.color in self.zones:
-                    self.zones[robot.holding_item.color] = robot.holding_item.zone_id
-                # TODO: assign destination based off of the zone
-                self.assign_task(robot.robot_id, ZONE_1, DROP_OFF)
+                match str(robot.item_colour):
+                    case "RED":
+                        self.assign_task(robot.robot_id, ZONE_2, DROP_OFF)
+                    case "GREEN":
+                        self.assign_task(robot.robot_id, ZONE_3, DROP_OFF)
+                    case "BLUE":
+                        self.assign_task(robot.robot_id, ZONE_4, DROP_OFF)
             else:
-                destination = Point()
-                # TODO : Implement logic to assign the closest item to the robot
-                print(robot.robot_id)
-                self.assign_task(robot.robot_id, ZONE_2, PICK_UP)
+                match str(robot.robot_id):
+                    case "robot1":
+                        self.assign_task(robot.robot_id, BLUE_CLUSTER, PICK_UP)
+                    case "robot2":
+                        self.assign_task(robot.robot_id, RED_CLUSTER, PICK_UP)   
+                    case "robot1":
+                        self.assign_task(robot.robot_id, GREEN_CLUSTER, PICK_UP)
+                
     
     def destroy_node(self):
         super().destroy_node()
