@@ -1,37 +1,33 @@
 import sys
 
+# ROS2 Libraries 
 import rclpy
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 from rclpy.executors import ExternalShutdownException
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from assessment_interfaces.msg import RobotList, ItemList, ZoneList
-
-from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from rclpy.duration import Duration
+from rclpy.qos import QoSPresetProfiles
 
+# Messages and services
+from assessment_interfaces.msg import RobotList, ItemList, ZoneList
 from auro_interfaces.msg import StringWithPose
 from auro_interfaces.srv import ItemRequest
-
 from solution_interfaces.msg import Task, TaskList
-from solution_interfaces.srv import TaskComplete
-
-import math
-import random
-import copy
+from solution_interfaces.srv import TaskComplete, GetInitialPose
+from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist, Point, PoseStamped
-from std_msgs.msg import String
+
+# Navigation
+from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 from nav_msgs.msg import Odometry
 
+# Misc
+import random
+import math
 import angles
 from enum import Enum
 from tf_transformations import euler_from_quaternion
-
-# Zone locations
-ZONE_1 = Point(x = -3.5, y = 2.5)
-ZONE_2 = Point(x = -3.5, y = -2.5)
-ZONE_3 = Point(x = 2.5, y = -2.5)
-ZONE_4 = Point(x = 2.5, y = 2.5)
 
 # Map Edges
 MIN_X = -3.5
@@ -42,14 +38,22 @@ MAX_Y = 2.5
 # Task constants
 PICK_UP = 0
 DROP_OFF = 1
-    
+
+# Scan constants
+SCAN_THRESHOLD = 0.3
+SCAN_FRONT = 0
+SCAN_LEFT = 1
+SCAN_BACK = 2
+SCAN_RIGHT = 3
+
+# Robot controller states    
 class State(Enum):
     IDLE = 0
     PICK_UP_ITEM = 1
     OFFLOAD_ITEM = 2
     NAVIGATING = 3
     REPORT_TASK_COMPLETE = 4
-
+    OBSTACLE_AVOIDANCE = 5
 
 class RobotControllerNode(Node):
     def __init__(self):
@@ -61,10 +65,15 @@ class RobotControllerNode(Node):
         self.pose = PoseStamped()
         self.pose.header.frame_id = 'map'
         self.pose.header.stamp = self.get_clock().now().to_msg()
-        # TODO: Set initial pose dynamically
-        self.pose.pose.position.x = -3.5
-        self.pose.pose.position.y = 0.0
-        self.pose.pose.orientation.z = 0.0 
+        
+        # Set initial pose dynamically
+        self.declare_parameter('x', 0.0)
+        self.declare_parameter('y', 0.0)
+        self.declare_parameter('yaw', 0.0)
+
+        self.pose.pose.position.x = self.get_parameter('x').value
+        self.pose.pose.position.y = self.get_parameter('y').value
+        self.yaw = self.get_parameter('yaw').value
 
         self.state = State.IDLE
         self.current_task = None
@@ -73,12 +82,15 @@ class RobotControllerNode(Node):
         self.goal_pose.header.frame_id = 'map'
 
         self.navigator = BasicNavigator()
-        
         self.navigator.setInitialPose(self.pose)
         self.navigator.waitUntilNav2Active()
 
         self.timer_period = 0.1 # 100 milliseconds = 10 Hz
         self.timer = self.create_timer(self.timer_period, self.control_loop)
+
+        # Collision detection
+        self.scan_triggered = [False] * 4
+        self.robot_in_way = False
 
         # Services
         client_callback_group = MutuallyExclusiveCallbackGroup()
@@ -87,6 +99,7 @@ class RobotControllerNode(Node):
         self.pick_up_service = self.create_client(ItemRequest, '/pick_up_item', callback_group=client_callback_group)
         self.offload_service = self.create_client(ItemRequest, '/offload_item', callback_group=client_callback_group)
         self.task_complete_service = self.create_client(TaskComplete, '/task_complete', callback_group=client_callback_group)
+        self.initial_pose_client = self.create_client(GetInitialPose, 'get_initial_pose')
 
         # Publishers
         self.marker_publisher = self.create_publisher(StringWithPose, 'robot_marker', 10)
@@ -95,10 +108,9 @@ class RobotControllerNode(Node):
 
         # Subscibers
         self.task_subscriber = self.create_subscription(TaskList, '/task_list', self.task_list_callback, 10, callback_group=timer_callback_group)
-        # self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
-        # self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, 10, callback_group=timer_callback_group)
-
-        self.navigator.waitUntilNav2Active()
+        self.odom_subscriber = self.create_subscription(Odometry, 'odom', self.odom_callback, 10, callback_group=timer_callback_group)
+        self.scan_subscriber = self.create_subscription(LaserScan, 'scan', self.scan_callback, QoSPresetProfiles.SENSOR_DATA.value, callback_group=timer_callback_group)
+        self.robots_subscriber = self.create_subscription(RobotList, '/robots', self.robots_callback, 10, callback_group=timer_callback_group)
         
         
     def task_list_callback(self, msg):
@@ -126,7 +138,36 @@ class RobotControllerNode(Node):
             self.get_logger().warn(f"Failed to mark task {task_id} as complete: {future.result().message}")
         return 
 
+    def odom_callback(self, msg):
+        self.pose.pose = msg.pose.pose
+
+        (roll, pitch, yaw) = euler_from_quaternion([self.pose.orientation.x,
+                                                    self.pose.orientation.y,
+                                                    self.pose.orientation.z,
+                                                    self.pose.orientation.w])
+        
+        self.yaw = yaw
+
+    def scan_callback(self, msg):
+        front_ranges = msg.ranges[331:359] + msg.ranges[0:30]
+        left_ranges  = msg.ranges[31:90]
+        back_ranges  = msg.ranges[91:270]
+        right_ranges = msg.ranges[271:330]
+
+        self.scan_triggered[SCAN_FRONT] = min(front_ranges) < SCAN_THRESHOLD 
+        self.scan_triggered[SCAN_LEFT]  = min(left_ranges)  < SCAN_THRESHOLD
+        self.scan_triggered[SCAN_BACK]  = min(back_ranges)  < SCAN_THRESHOLD
+        self.scan_triggered[SCAN_RIGHT] = min(right_ranges) < SCAN_THRESHOLD
+
+    def robots_callback(self, msg):
+        for robot in msg.data:
+            if robot.size >= 0.4:
+                self.robot_in_way = True 
+        else:
+            self.robot_in_way = False
+
     def control_loop(self):
+        
         marker_input = StringWithPose()
         marker_input.text = str(self.state)
         marker_input.pose = self.pose.pose 
@@ -153,6 +194,10 @@ class RobotControllerNode(Node):
                         self.get_logger().error(f"Failed to navigate to goal: {e}")
 
                     while not self.navigator.isTaskComplete():
+                        if True in self.scan_triggered:
+                            self.state = State.OBSTACLE_AVOIDANCE
+                            self.current_task = None
+                            return
                         feedback = self.navigator.getFeedback()
                         if self.current_task != None:
                             self.get_logger().info("Task recieved, canceling exploration")
@@ -163,10 +208,10 @@ class RobotControllerNode(Node):
                 
             case State.PICK_UP_ITEM:
                 # Pick up item
-                rqt = ItemRequest.Request()
-                rqt.robot_id = self.robot_id
+                request = ItemRequest.Request()
+                request.robot_id = self.robot_id
                 try:
-                    future = self.pick_up_service.call_async(rqt)
+                    future = self.pick_up_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
                     if response.success:
@@ -180,10 +225,10 @@ class RobotControllerNode(Node):
 
             case State.OFFLOAD_ITEM:
                 # Drop item
-                rqt = ItemRequest.Request()
-                rqt.robot_id = self.robot_id
+                request = ItemRequest.Request()
+                request.robot_id = self.robot_id
                 try:
-                    future = self.offload_service.call_async(rqt)
+                    future = self.offload_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
                     if response.success:
@@ -205,10 +250,18 @@ class RobotControllerNode(Node):
 
                 # Wait for the navigator to complete the task
                 while not self.navigator.isTaskComplete():
+                    # Obstacle avoidance
+                    if True in self.scan_triggered:
+                        self.state = State.OBSTACLE_AVOIDANCE
+                        self.current_task = None
+                        return
+                    
+                    # Give feedback on estimated time of arrival
                     feedback = self.navigator.getFeedback()
                     if feedback:
                         eta = Duration.from_msg(feedback.estimated_time_remaining).nanoseconds / 1e9
                         self.get_logger().info(f"Estimated time of arrival: {eta:.0f} seconds.")
+                    
                 
                 # Once the navigator has finished, complete the task or catch failures
                 result = self.navigator.getResult()
@@ -238,22 +291,58 @@ class RobotControllerNode(Node):
                         self.state = State.IDLE
 
             case State.REPORT_TASK_COMPLETE:
-                rqt = TaskComplete.Request()
-                rqt.robot_id = self.robot_id
-                rqt.task_id = self.current_task.task_id
+                request = TaskComplete.Request()
+                request.robot_id = self.robot_id
+                request.task_id = self.current_task.task_id
                 try:
-                    future = self.task_complete_service.call_async(rqt)
+                    future = self.task_complete_service.call_async(request)
                     self.executor.spin_until_future_complete(future)
                     response = future.result()
                     if response.success:
                         self.current_task = None
                         self.state = State.IDLE
                     else:
-                        self.get_logger().warn(f"Failed to mark task {rqt.task_id} as complete: {future.result().message}")
+                        self.get_logger().warn(f"Failed to mark task {request.task_id} as complete: {future.result().message}")
                         self.state = State.IDLE
                 except Exception as e:
                     self.get_logger().info('Exception ' + str(e))
 
+            case State.OBSTACLE_AVOIDANCE:
+                # Cancel current task, as it won't be marked as complete it can be picked up again later
+                self.get_logger().warn("Obstacle detected. Current task canceled")
+                self.navigator.cancelTask()
+                # Reset Navigator
+                self.navigator.setInitialPose(self.pose)
+                if self.robot_in_way:
+                    # Calculate a new goal behind the robot
+                    backup_distance = 0.2  # Distance to back up
+                    backup_pose = PoseStamped()
+                    backup_pose.header.frame_id = 'map'
+                    backup_pose.header.stamp = self.get_clock().now().to_msg()
+                    backup_pose.pose.position.x = self.pose.pose.position.x - backup_distance * math.cos(self.yaw)
+                    backup_pose.pose.position.y = self.pose.pose.position.y - backup_distance * math.sin(self.yaw)
+                    backup_pose.pose.orientation = self.pose.pose.orientation
+
+                    # Navigate to the backup position
+                    self.get_logger().info("Backing up to avoid robot in the way.")
+                    try:
+                        self.navigator.goToPose(backup_pose)
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to navigate to backup position: {e}")
+                        self.state = State.IDLE  # Return to idle if navigation fails
+
+                    while not self.navigator.isTaskComplete():
+                        feedback = self.navigator.getFeedback()
+                        if feedback:
+                            self.get_logger().info("Backing up...")
+
+                    result = self.navigator.getResult()
+                    if result == TaskResult.SUCCEEDED:
+                        self.get_logger().info("Successfully backed up.")
+                    else:
+                        self.get_logger().warn("Failed to back up.")
+                    rclpy.sleep(Duration(seconds=random.uniform(1, 5)))
+                self.state = State.IDLE    
 
     def destroy_node(self):
         super().destroy_node()
